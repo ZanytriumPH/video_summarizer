@@ -1,7 +1,7 @@
 
 from pathlib import Path
 from core.extraction.base import VideoSource
-from core.extraction.video.downloader import VideoDownloader
+from core.extraction.infrastructure.video.downloader import VideoDownloader
 
 class UrlVideoSource(VideoSource):
     """

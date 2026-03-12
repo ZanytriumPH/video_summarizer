@@ -12,7 +12,7 @@ import base64
 # 将项目根目录添加到 sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..')))
 
-from core.extraction.extractor import MediaExtractor
+from core.extraction.infrastructure.extractor import MediaExtractor
 
 class TestMediaExtractor(unittest.TestCase):
 
@@ -40,7 +40,7 @@ class TestMediaExtractor(unittest.TestCase):
             if d.exists():
                 shutil.rmtree(d)
 
-    @patch('core.extraction.extractor.VideoFileClip')
+    @patch('core.extraction.infrastructure.extractor.VideoFileClip')
     def test_extract_audio(self, mock_video_file_clip):
         """测试 extract_audio 方法"""
         # --- 准备模拟 ---
@@ -72,8 +72,8 @@ class TestMediaExtractor(unittest.TestCase):
         # 4. 验证方法的返回值是否是预期的输出路径
         self.assertEqual(result_path, expected_audio_path)
 
-    @patch('core.extraction.extractor.cv2.imencode')
-    @patch('core.extraction.extractor.cv2.VideoCapture')
+    @patch('core.extraction.infrastructure.extractor.cv2.imencode')
+    @patch('core.extraction.infrastructure.extractor.cv2.VideoCapture')
     def test_extract_frames(self, mock_video_capture, mock_imencode):
         """测试 extract_frames 方法"""
         # --- 准备模拟 ---

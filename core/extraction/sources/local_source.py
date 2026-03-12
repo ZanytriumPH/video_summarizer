@@ -2,7 +2,7 @@
 from pathlib import Path
 from typing import IO
 from core.extraction.base import VideoSource
-from core.extraction.video.local_video_handler import LocalVideoHandler
+from core.extraction.infrastructure.video.local_video_handler import LocalVideoHandler
 
 class LocalFileVideoSource(VideoSource):
     """

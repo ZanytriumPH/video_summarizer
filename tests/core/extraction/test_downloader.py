@@ -10,7 +10,7 @@ import os
 # 这对于在命令行中直接运行测试脚本是必要的
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..')))
 
-from core.extraction.video.downloader import VideoDownloader
+from core.extraction.infrastructure.video.downloader import VideoDownloader
 
 class TestVideoDownloader(unittest.TestCase):
 
@@ -27,7 +27,7 @@ class TestVideoDownloader(unittest.TestCase):
         if self.test_dir.exists():
             shutil.rmtree(self.test_dir)
 
-    @patch('core.extraction.video.downloader.yt_dlp.YoutubeDL')
+    @patch('core.extraction.infrastructure.video.downloader.yt_dlp.YoutubeDL')
     def test_download_success(self, mock_youtube_dl):
         """测试视频下载成功的情况"""
         # --- 准备模拟 ---

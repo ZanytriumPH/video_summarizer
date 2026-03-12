@@ -2,11 +2,10 @@
 from abc import ABC, abstractmethod
 from typing import Tuple, List
 from pathlib import Path
-import os
 
 from config.settings import DEFAULT_FRAME_INTERVAL
-from .extractor import MediaExtractor
-from .transcriber import AudioTranscriber
+from core.extraction.infrastructure.extractor import MediaExtractor
+from core.extraction.infrastructure.transcriber import AudioTranscriber
 
 class VideoSource(ABC):
     """
