@@ -1,14 +1,24 @@
 
 from abc import ABC, abstractmethod
-from typing import Tuple, List, Any
+from typing import Tuple, List
 from pathlib import Path
+import os
+
 from config.settings import DEFAULT_FRAME_INTERVAL
+from .extractor import MediaExtractor
+from .transcriber import AudioTranscriber
 
 class VideoSource(ABC):
     """
     视频源抽象基类。
-    定义了从不同来源获取视频并处理成标准输出（转录文本+关键帧）的接口。
+    封装了从视频源获取、提取、转录的完整流程。
     """
+    def __init__(self, api_key: str, base_url: str = None):
+        if not api_key:
+            raise ValueError("API key is required for transcription.")
+        
+        self.extractor = MediaExtractor()
+        self.transcriber = AudioTranscriber(api_key, base_url=base_url)
 
     @abstractmethod
     def acquire_video(self) -> Path:
@@ -21,16 +31,12 @@ class VideoSource(ABC):
         """
         pass
 
-    def process(self, extractor: Any, transcriber: Any) -> Tuple[str, List[str]]:
+    def process(self) -> Tuple[str, List[str]]:
         """
         模板方法：执行标准的视频处理流程。
         1. 获取视频 (acquire_video)
-        2. 提取音频和关键帧 (extractor)
-        3. 转录音频 (transcriber)
-        
-        Args:
-            extractor: 实现了 extract_audio 和 extract_frames 的对象。
-            transcriber: 实现了 transcribe 的对象。
+        2. 提取音频和关键帧 (self.extractor)
+        3. 转录音频 (self.transcriber)
             
         Returns:
             Tuple[str, List[str]]: (转录文本, 关键帧列表)
@@ -41,16 +47,16 @@ class VideoSource(ABC):
 
         # 2. 提取内容
         print("Extracting audio...")
-        audio_path = extractor.extract_audio(video_path)
+        audio_path = self.extractor.extract_audio(video_path)
         print(f"Audio extracted to: {audio_path}")
 
         print("Extracting frames...")
-        frames = extractor.extract_frames(video_path, interval=DEFAULT_FRAME_INTERVAL)
+        frames = self.extractor.extract_frames(video_path, interval=DEFAULT_FRAME_INTERVAL)
         print(f"Extracted {len(frames)} frames.")
 
         # 3. 生成转录
         print("Transcribing audio...")
-        transcript = transcriber.transcribe(audio_path)
+        transcript = self.transcriber.transcribe(audio_path)
         print(f"Transcription complete. Length: {len(transcript)}")
 
         return transcript, frames

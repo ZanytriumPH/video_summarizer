@@ -9,7 +9,8 @@ class LocalFileVideoSource(VideoSource):
     针对本地上传视频源的实现。
     使用 LocalVideoHandler 保存上传的文件。
     """
-    def __init__(self, uploaded_file: IO[bytes], original_filename: str):
+    def __init__(self, uploaded_file: IO[bytes], original_filename: str, api_key: str, base_url: str = None):
+        super().__init__(api_key, base_url)
         self.uploaded_file = uploaded_file
         self.original_filename = original_filename
         self.handler = LocalVideoHandler()
