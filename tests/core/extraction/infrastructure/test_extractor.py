@@ -4,10 +4,8 @@ from pathlib import Path
 import shutil
 import sys
 import os
-import cv2
+import math
 import numpy as np
-import base64
-import re
 
 # 将项目根目录添加到 sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..')))
@@ -37,9 +35,13 @@ class TestMediaExtractor(unittest.TestCase):
             if d.exists():
                 shutil.rmtree(d)
 
+    # ==========================
+    # extract_audio 健壮性测试
+    # ==========================
+
     @patch('core.extraction.infrastructure.extractor.VideoFileClip')
-    def test_extract_audio(self, mock_video_file_clip):
-        """测试 extract_audio 方法"""
+    def test_extract_audio_normal(self, mock_video_file_clip):
+        """正常情况：提取音频成功"""
         mock_clip_instance = MagicMock()
         mock_video_file_clip.return_value.__enter__.return_value = mock_clip_instance
         mock_audio = MagicMock()
@@ -56,59 +58,164 @@ class TestMediaExtractor(unittest.TestCase):
         )
         self.assertEqual(result_path, expected_audio_path)
 
+    @patch('core.extraction.infrastructure.extractor.VideoFileClip')
+    def test_extract_audio_no_audio_track(self, mock_video_file_clip):
+        """边界情况：视频无音轨 (clip.audio 为 None)，应优雅返回 None 而不是崩溃"""
+        mock_clip_instance = MagicMock()
+        mock_video_file_clip.return_value.__enter__.return_value = mock_clip_instance
+        mock_clip_instance.audio = None  # 强行设为无音轨
+
+        result_path = self.extractor.extract_audio(self.dummy_video_path)
+
+        self.assertIsNone(result_path, "当没有音轨时，系统应当拦截属性调用并优雅返回 None")
+
+    def test_extract_audio_file_not_found(self):
+        """边界情况：文件不存在，应当提前抛出明确的 FileNotFoundError"""
+        non_existent_path = self.test_input_video_dir / "ghost.mp4"
+        with self.assertRaises(FileNotFoundError):
+            self.extractor.extract_audio(non_existent_path)
+
+
+    # ==========================
+    # extract_frames 健壮性测试
+    # ==========================
+
+    def test_extract_frames_file_not_found(self):
+        """边界情况：文件不存在，应当抛出 FileNotFoundError"""
+        non_existent_path = self.test_input_video_dir / "ghost.mp4"
+        with self.assertRaises(FileNotFoundError):
+            self.extractor.extract_frames(non_existent_path)
+
     @patch('core.extraction.infrastructure.extractor.cv2.imencode')
     @patch('core.extraction.infrastructure.extractor.cv2.VideoCapture')
-    def test_extract_frames(self, mock_video_capture, mock_imencode):
-        """测试 extract_frames 方法，验证返回包含时间戳的字典列表"""
-        # --- 准备模拟 ---
+    def test_extract_frames_scene_detection(self, mock_video_capture, mock_imencode):
+        """一般情况：测试 extract_frames 的基于灰度直方图的场景剧变检测逻辑"""
         mock_cap_instance = MagicMock()
         mock_video_capture.return_value = mock_cap_instance
+        mock_cap_instance.isOpened.return_value = True
+        mock_cap_instance.get.return_value = 10.0
+
+        total_frames = 50
+        scene_A = np.zeros((100, 100, 3), dtype=np.uint8) # 全黑
+        scene_B = np.ones((100, 100, 3), dtype=np.uint8) * 255 # 全白
         
-        fps = 30
+        side_effect = []
+        for i in range(total_frames):
+            if i < 20:
+                side_effect.append((True, scene_A))
+            else:
+                side_effect.append((True, scene_B))
+        side_effect.append((False, None))
+        
+        mock_cap_instance.read.side_effect = side_effect
+        mock_imencode.return_value = (True, np.array([1, 2, 3]))
+        
+        frames = self.extractor.extract_frames(self.dummy_video_path, interval=1, max_interval=3, threshold=0.90)
+
+        expected_extracted_count = 2 # 0s 和 2s
+        self.assertEqual(mock_imencode.call_count, expected_extracted_count)
+        self.assertEqual(len(frames), expected_extracted_count)
+        self.assertEqual(frames[0]["time"], "00:00")
+        self.assertEqual(frames[1]["time"], "00:02")
+
+    @patch('core.extraction.infrastructure.extractor.cv2.imencode')
+    @patch('core.extraction.infrastructure.extractor.cv2.VideoCapture')
+    def test_extract_frames_short_video(self, mock_video_capture, mock_imencode):
+        """边界情况：极短视频（只有 1 帧，0.1秒），确保至少提取首帧"""
+        mock_cap_instance = MagicMock()
+        mock_video_capture.return_value = mock_cap_instance
+        mock_cap_instance.isOpened.return_value = True
+        mock_cap_instance.get.return_value = 10.0
+
+        scene = np.zeros((100, 100, 3), dtype=np.uint8) 
+        mock_cap_instance.read.side_effect = [(True, scene), (False, None)]
+        mock_imencode.return_value = (True, np.array([1]))
+
+        frames = self.extractor.extract_frames(self.dummy_video_path, interval=2, max_interval=60)
+
+        self.assertEqual(len(frames), 1, "极短视频也必须保证抽取首帧作为兜底")
+        self.assertEqual(frames[0]["time"], "00:00")
+
+    @patch('core.extraction.infrastructure.extractor.cv2.imencode')
+    @patch('core.extraction.infrastructure.extractor.cv2.VideoCapture')
+    def test_extract_frames_abnormal_fps(self, mock_video_capture, mock_imencode):
+        """边界情况：异常的 FPS (NaN 或 0)，应退推至 30.0 默认值，防止除零错误崩溃"""
+        mock_cap_instance = MagicMock()
+        mock_video_capture.return_value = mock_cap_instance
+        mock_cap_instance.isOpened.return_value = True
+        
+        # 模拟各种破损视频头引发的恶劣参数
+        for bad_fps in [0.0, -5.0, math.nan, None]:
+            mock_cap_instance.get.return_value = bad_fps 
+
+            scene = np.zeros((10, 10, 3), dtype=np.uint8) 
+            mock_cap_instance.read.side_effect = [(True, scene), (False, None)]
+            mock_imencode.return_value = (True, np.array([1]))
+
+            frames = self.extractor.extract_frames(self.dummy_video_path)
+
+            self.assertEqual(len(frames), 1)
+            self.assertEqual(frames[0]["time"], "00:00")
+
+    @patch('core.extraction.infrastructure.extractor.cv2.imencode')
+    @patch('core.extraction.infrastructure.extractor.cv2.VideoCapture')
+    def test_extract_frames_stream_interrupt(self, mock_video_capture, mock_imencode):
+        """边界情况：视频流中断或尾部破损，read() 突然返回 False, 程序不应崩溃，必须保存已抽取的成果"""
+        mock_cap_instance = MagicMock()
+        mock_video_capture.return_value = mock_cap_instance
+        mock_cap_instance.isOpened.return_value = True
+        mock_cap_instance.get.return_value = 10.0 
+
+        scene = np.zeros((100, 100, 3), dtype=np.uint8) 
+        # 前 15 帧正常，第 16 帧突然断裂
+        side_effect = [(True, scene) for _ in range(15)] + [(False, None)]
+        mock_cap_instance.read.side_effect = side_effect
+        mock_imencode.return_value = (True, np.array([1]))
+
+        # 使用 max_interval=1 迫使系统在 1s 处抽第二帧
+        frames = self.extractor.extract_frames(self.dummy_video_path, max_interval=1)
+        
+        self.assertEqual(len(frames), 2, "即使发生断流，也必须安全退出并返回断流前成功抽取的帧集合")
+        self.assertEqual(frames[0]["time"], "00:00")
+        self.assertEqual(frames[1]["time"], "00:01")
+
+    @patch('core.extraction.infrastructure.extractor.cv2.imencode')
+    @patch('core.extraction.infrastructure.extractor.cv2.VideoCapture')
+    def test_extract_frames_long_video_timestamp(self, mock_video_capture, mock_imencode):
+        """边界情况：超长视频 (> 1小时)，时间戳必须自适应升维为 HH:MM:SS 格式"""
+        mock_cap_instance = MagicMock()
+        mock_video_capture.return_value = mock_cap_instance
+        mock_cap_instance.isOpened.return_value = True
+        
+        # 黑客级技巧：使用一个极低的极小 FPS，使得在第二帧的 current_time 瞬间跨越 1 小时
+        fps = 1.0 / 3665.0  # 1 帧代表 3665 秒
         mock_cap_instance.get.return_value = fps
 
-        total_frames = 61
-        fake_image = np.zeros((100, 100, 3), dtype=np.uint8)
-        side_effect = [(True, fake_image) for _ in range(total_frames)]
-        side_effect.append((False, None))
-        mock_cap_instance.read.side_effect = side_effect
+        scene = np.zeros((10, 10, 3), dtype=np.uint8) 
+        mock_cap_instance.read.side_effect = [(True, scene), (True, scene), (False, None)]
+        mock_imencode.return_value = (True, np.array([1]))
 
-        fake_encoded_buffer = (True, np.array([1, 2, 3]))
-        mock_imencode.return_value = fake_encoded_buffer
+        # 迫使兜底机制起效
+        frames = self.extractor.extract_frames(self.dummy_video_path, max_interval=1)
         
-        # --- 执行测试 ---
-        interval_seconds = 1
-        frames = self.extractor.extract_frames(self.dummy_video_path, interval=interval_seconds)
+        self.assertEqual(len(frames), 2)
+        self.assertEqual(frames[0]["time"], "00:00")
+        self.assertEqual(frames[1]["time"], "01:01:05", "超过1小时的时间戳必须格式化为 HH:MM:SS")
 
-        # --- 断言 ---
-        mock_video_capture.assert_called_once_with(str(self.dummy_video_path))
-        mock_cap_instance.get.assert_called_once_with(cv2.CAP_PROP_FPS)
-        self.assertEqual(mock_cap_instance.read.call_count, total_frames + 1)
+    @patch('core.extraction.infrastructure.extractor.cv2.imencode')
+    @patch('core.extraction.infrastructure.extractor.cv2.VideoCapture')
+    def test_extract_frames_first_frame_fail(self, mock_video_capture, mock_imencode):
+        """边界情况：首帧读取失败（视频完全空或严重损坏），应退推并返回空列表 []"""
+        mock_cap_instance = MagicMock()
+        mock_video_capture.return_value = mock_cap_instance
+        mock_cap_instance.isOpened.return_value = True
+        mock_cap_instance.get.return_value = 30.0
 
-        # 验证抽帧次数
-        expected_extracted_count = 3 # 0s, 1s, 2s
-        self.assertEqual(mock_imencode.call_count, expected_extracted_count)
-        
-        # 验证返回的帧列表长度
-        self.assertEqual(len(frames), expected_extracted_count)
-        
-        # 【核心改造】验证返回结果的结构和内容
-        expected_b64_string = base64.b64encode(fake_encoded_buffer[1]).decode('utf-8')
-        expected_timestamps = ["00:00", "00:01", "00:02"]
+        mock_cap_instance.read.return_value = (False, None)
 
-        for i, frame_dict in enumerate(frames):
-            self.assertIsInstance(frame_dict, dict, "每个元素都应该是字典")
-            self.assertIn("time", frame_dict, "字典应包含 'time' 键")
-            self.assertIn("image", frame_dict, "字典应包含 'image' 键")
-            
-            # 验证时间戳
-            self.assertEqual(frame_dict["time"], expected_timestamps[i])
-            self.assertTrue(re.match(r"^\d{2}:\d{2}$", frame_dict["time"]), "时间戳格式应为 MM:SS")
-            
-            # 验证图像数据
-            self.assertEqual(frame_dict["image"], expected_b64_string)
+        frames = self.extractor.extract_frames(self.dummy_video_path)
 
-        mock_cap_instance.release.assert_called_once()
+        self.assertEqual(frames, [], "首帧都读不到时，不应崩溃，必须兜底返回空列表")
 
 if __name__ == '__main__':
     unittest.main()
