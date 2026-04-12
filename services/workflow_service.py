@@ -15,7 +15,13 @@ class VideoSummaryService:
         self.base_url = os.getenv("OPENAI_BASE_URL")
         self.api_key = api_key
         
-        # 【核心改造】不再需要初始化 analyzer 和 generator
+        # 【环境变量依赖注入】
+        # 将前端传入的 API Key 挂载到环境变量中。
+        # 这是为了确保完全解耦的 LangGraph 内部节点（如 text_analyzer_node）
+        # 可以安全且纯粹地调用 os.getenv("OPENAI_API_KEY") 而无需破坏状态机签名。
+        if self.api_key:
+            os.environ["OPENAI_API_KEY"] = self.api_key
+
         # 核心组件的初始化现在由 langgraph 内部管理
 
     def _process_source(self, source: VideoSource, user_prompt: str = "") -> str:
