@@ -2,9 +2,11 @@ import unittest
 from unittest.mock import patch, MagicMock
 import os
 import sys
+from pathlib import Path
 
 # 将项目根目录添加到 sys.path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..')))
+project_root = Path(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..')))
+sys.path.insert(0, str(project_root))
 
 from core.workflow.video_summary.nodes.vision_analyzer import vision_analyzer_node
 
@@ -34,13 +36,14 @@ class TestVisionAnalyzerNode(unittest.TestCase):
             
     @patch.dict(os.environ, {"OPENAI_API_KEY": "fake_vision_key", "OPENAI_BASE_URL": "https://fake.url"})
     @patch('core.workflow.video_summary.nodes.vision_analyzer.OpenAI')
-    def test_successful_vision_analysis(self, mock_openai_class):
-        """一般情况：成功的视觉多模态 API 调用，验证组装结构和返回值"""
+    def test_successful_vision_analysis_no_tools(self, mock_openai_class):
+        """一般情况：成功的视觉多模态 API 调用，无触发工具，直接输出分析"""
         # 准备 Mock
         mock_client = MagicMock()
         mock_openai_class.return_value = mock_client
         
         mock_response = MagicMock()
+        mock_response.choices[0].message.tool_calls = None
         mock_response.choices[0].message.content = "1. 动作: 挥手...\n2. PPT: AI 架构图。"
         mock_client.chat.completions.create.return_value = mock_response
         
@@ -73,6 +76,77 @@ class TestVisionAnalyzerNode(unittest.TestCase):
         
         self.assertEqual(user_message_content[4]["type"], "image_url")
         self.assertIn("base64_fake_data_2", user_message_content[4]["image_url"]["url"])
+
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "fake_key_123", "OPENAI_BASE_URL": "https://fake.url"})
+    @patch('core.workflow.video_summary.nodes.vision_analyzer.OpenAI')
+    @patch('core.workflow.video_summary.nodes.vision_analyzer.execute_tavily_search')
+    def test_tool_call_success_loop(self, mock_tavily_search, mock_openai_class):
+        """核心创新情况：视觉大模型遇到盲点，主动发起“以图生文再搜索 (Tool Call)”，并在下一轮返回最终结果"""
+        mock_client = MagicMock()
+        mock_openai_class.return_value = mock_client
+        
+        # 第一次请求：遭遇知识盲区，要求抛出 Tool Call
+        mock_tool_call = MagicMock()
+        mock_tool_call.id = "call_vision_123"
+        mock_tool_call.function.name = "tavily_search"
+        mock_tool_call.function.arguments = '{"query": "this is fine dog sitting in fire meme meaning"}'
+        
+        mock_message_1 = MagicMock()
+        mock_message_1.tool_calls = [mock_tool_call]
+        mock_message_1.content = None
+        
+        mock_response_1 = MagicMock()
+        mock_response_1.choices[0].message = mock_message_1
+        
+        # 第二次请求：拿到 Python 提供给它的外部网页百科，终于恍然大悟输出结果
+        mock_message_2 = MagicMock()
+        mock_message_2.tool_calls = None
+        mock_message_2.content = "这是一张著名的 This is fine 热门梗图，表示面对灾难强作镇定..."
+        
+        mock_response_2 = MagicMock()
+        mock_response_2.choices[0].message = mock_message_2
+        
+        mock_client.chat.completions.create.side_effect = [mock_response_1, mock_response_2]
+        
+        # 拦截底层的网络调用
+        mock_tavily_search.return_value = "This is fine is a meme of a dog sitting in a room on fire..."
+        
+        result = vision_analyzer_node(self.valid_state)
+        
+        # 严格断言 ReAct 流转次数（请求了 2 次 LLM）
+        self.assertEqual(mock_client.chat.completions.create.call_count, 2)
+        # 断言是否正确触发了以图生文的文本搜索
+        mock_tavily_search.assert_called_once_with("this is fine dog sitting in fire meme meaning")
+        # 验证输出了终态
+        self.assertEqual(result["visual_insights"], "这是一张著名的 This is fine 热门梗图，表示面对灾难强作镇定...")
+
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "fake_key_123"})
+    @patch('core.workflow.video_summary.nodes.vision_analyzer.OpenAI')
+    def test_tool_call_max_loop_fallback(self, mock_openai_class):
+        """边界情况 4：防死循环。视觉模型陷入无限次 Tool Call 循环，触发强制兜底退出"""
+        mock_client = MagicMock()
+        mock_openai_class.return_value = mock_client
+        
+        mock_tool_call = MagicMock()
+        mock_tool_call.id = "call_vision_123"
+        mock_tool_call.function.name = "tavily_search"
+        mock_tool_call.function.arguments = '{"query": "infinite loop"}'
+        
+        mock_message = MagicMock()
+        mock_message.tool_calls = [mock_tool_call]
+        mock_message.content = "这是我最后一次请求之前的废话"
+        
+        mock_response = MagicMock()
+        mock_response.choices[0].message = mock_message
+        
+        # 大模型像发疯一样始终返回 tool call
+        mock_client.chat.completions.create.return_value = mock_response
+        
+        result = vision_analyzer_node(self.valid_state)
+        
+        # vision_analyzer 的 max_tool_calls 是 3，到达上限后直接断开
+        self.assertEqual(mock_client.chat.completions.create.call_count, 3)
+        self.assertEqual(result["visual_insights"], "这是我最后一次请求之前的废话", "由于强制短路，应当兜底输出它发疯前的最后一句有效回复")
 
     @patch.dict(os.environ, {"OPENAI_API_KEY": "fake_vision_key"})
     @patch('core.workflow.video_summary.nodes.vision_analyzer.OpenAI')

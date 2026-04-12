@@ -1,0 +1,53 @@
+import unittest
+from unittest.mock import patch, MagicMock
+import os
+import sys
+import json
+from pathlib import Path
+
+# 将项目根目录添加到 sys.path
+project_root = Path(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..')))
+sys.path.insert(0, str(project_root))
+
+from core.workflow.video_summary.tools.search_tools import execute_tavily_search
+
+class TestSearchTools(unittest.TestCase):
+    
+    @patch.dict(os.environ, clear=True)
+    def test_execute_tavily_search_no_key(self):
+        """边界情况 1：无 API Key 时应平滑降级，而不是抛出异常"""
+        result = execute_tavily_search("test query")
+        self.assertIn("Tool Execution Failed", result)
+        self.assertIn("TAVILY_API_KEY is not configured", result)
+
+    @patch.dict(os.environ, {"TAVILY_API_KEY": "fake_tavily_key"})
+    @patch('urllib.request.urlopen')
+    def test_execute_tavily_search_success(self, mock_urlopen):
+        """一般情况：成功请求 Tavily 并解析结果"""
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps({
+            "results": [
+                {"content": "This is fine is a meme..."},
+                {"content": "It features a dog..."}
+            ]
+        }).encode("utf-8")
+        mock_response.__enter__.return_value = mock_response
+        mock_urlopen.return_value = mock_response
+        
+        result = execute_tavily_search("this is fine dog")
+        self.assertIn("Web Search Results:", result)
+        self.assertIn("This is fine is a meme", result)
+
+    @patch.dict(os.environ, {"TAVILY_API_KEY": "fake_tavily_key"})
+    @patch('urllib.request.urlopen')
+    def test_execute_tavily_search_network_error(self, mock_urlopen):
+        """边界情况 2：网络超时或外部 API 报错时，应被捕获并返回平滑降级的字符串"""
+        mock_urlopen.side_effect = Exception("Timeout")
+        
+        result = execute_tavily_search("query")
+        self.assertIn("Tool Execution Failed", result)
+        self.assertIn("Network error", result)
+        self.assertIn("Timeout", result)
+
+if __name__ == '__main__':
+    unittest.main()

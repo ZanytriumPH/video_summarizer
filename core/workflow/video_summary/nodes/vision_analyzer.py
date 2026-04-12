@@ -1,14 +1,18 @@
 import os
+import json
 from openai import OpenAI
 from core.workflow.video_summary.state import VideoSummaryState
+from core.workflow.video_summary.tools.search_tools import execute_tavily_search
+
+# [重构优化] 引入 Tool Handler Mapping (策略模式)，彻底消除僵硬的 if-else 分支
+AVAILABLE_TOOLS = {
+    "tavily_search": lambda args: execute_tavily_search(args.get("query", ""))
+}
 
 def vision_analyzer_node(state: VideoSummaryState) -> dict:
     """
-    视觉处理节点。调用多模态大模型（Vision LLM），传入 keyframes 和对应的时间戳，
-    要求模型描述画面中的关键动作、PPT 文本或场景变化。
-    
-    :param state: VideoSummaryState
-    :return: dict 包含更新的 visual_insights 字段
+    视觉处理节点 (Vision Agent) + ReAct 主动搜索能力。
+    调用多模态大模型，传入 keyframes，并赋予模型“以图生文再搜索”的工具调用能力。
     """
     keyframes = state.get("keyframes", [])
     user_prompt = state.get("user_prompt", "")
@@ -16,7 +20,6 @@ def vision_analyzer_node(state: VideoSummaryState) -> dict:
     if not keyframes:
         return {"visual_insights": "未提取到任何视频关键帧，无法进行视觉分析。"}
 
-    # 1. 获取凭证 (依赖于 workflow_service.py 注入的环境变量)
     api_key = os.getenv("OPENAI_API_KEY")
     base_url = os.getenv("OPENAI_BASE_URL")
     
@@ -25,20 +28,19 @@ def vision_analyzer_node(state: VideoSummaryState) -> dict:
         
     client = OpenAI(api_key=api_key, base_url=base_url)
     
-    # 2. 构造极其严谨的系统提示词，严防“多模态幻觉”
     system_prompt = (
-        "你是一个专业的多模态视频视觉分析专家。我将为你提供按时间顺序排列的视频关键帧截图。\n"
-        "你的任务是：仔细观察每一帧画面，提取出对于理解视频内容至关重要的视觉信息。\n\n"
-        "请重点关注以下三个维度：\n"
-        "1. 📊 屏幕/PPT内容：提取画面中出现的关键文字、图表走势、标题。\n"
-        "2. 🎬 动作与场景：描述人物的重要手势、演示动作、产品交互过程或场景的切换。\n"
-        "3. ⏱️ 时间线串联：结合提供的时间戳，梳理视觉信息的发展脉络。\n\n"
-        "【警告/约束】：\n"
-        "- 保持绝对客观，【绝不能】凭空捏造（幻觉）画面中没有的内容。如果不确定，请直接忽略。\n"
-        "- 输出格式必须清晰易读（推荐使用 Markdown 列表），并【必须】在每条结论前附上对应的时间戳（如 [00:15]）。"
+        "你是一个极其专业的多模态视频视觉分析专家 (Vision Agent)。我将为你提供按时间顺序排列的视频关键帧截图。\n"
+        "你的任务是：仔细观察每一帧画面，提取出对于理解视频内容至关重要的视觉信息（屏幕/PPT内容、动作与场景切换）。\n\n"
+        "【主动求知工具授权 (Tool Calling - 以图生文再搜索)】：\n"
+        "如果在画面中遇到了你完全无法理解的、非常前沿的软件 UI、热门网络形象、生僻动漫角色或爆火梗图，"
+        "你**必须主动停下来，使用赋予你的 `tavily_search` 搜索工具去获取背景知识**，绝不可凭空捏造。\n"
+        "执行策略：请凭借你优秀的视觉能力，首先在脑海中生成该梗图或画面的详尽特征描述（如：“屏幕上是一只狗坐在着火的房间里喝咖啡，配文 This is fine”），"
+        "然后将这串描述直接作为 query 参数，调用 `tavily_search` 来搜索该画面的深层含义或出处。\n\n"
+        "【约束】：\n"
+        "- 保持绝对客观，【绝不能】发生幻觉。\n"
+        "- 最终的视觉分析报告格式必须清晰易读，并【必须】在每条结论前附上对应的时间戳（如 [00:15]）。"
     )
     
-    # 3. 按照标准多模态格式组装消息体 (Text + Image URL Array)
     content_list = [
         {"type": "text", "text": f"【用户总结侧重点要求】：\n{user_prompt}\n\n以下是按时间顺序截取的视频关键帧："}
     ]
@@ -46,45 +48,90 @@ def vision_analyzer_node(state: VideoSummaryState) -> dict:
     for frame in keyframes:
         time_str = frame.get("time", "未知时间")
         base64_img = frame.get("image", "")
-        
         if not base64_img:
             continue
-            
-        # 3.1 插入时间戳文本作为锚点
-        content_list.append({
-            "type": "text",
-            "text": f"--- 当前画面时间戳: [{time_str}] ---"
-        })
+        content_list.append({"type": "text", "text": f"--- 当前画面时间戳: [{time_str}] ---"})
+        content_list.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_img}", "detail": "auto"}})
         
-        # 3.2 插入 Base64 图片 (符合官方 Vision API 规范)
-        content_list.append({
-            "type": "image_url",
-            "image_url": {
-                "url": f"data:image/jpeg;base64,{base64_img}",
-                "detail": "auto" # 允许模型根据图片尺寸自动选择 high/low 策略
-            }
-        })
-        
-    print(f"  -> [Vision Analyzer Node] Calling Vision LLM API with {len(keyframes)} frames...")
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": content_list}
+    ]
     
-    # 4. 执行多模态 API 调用
-    try:
-        # 支持通过环境变量单独指定视觉模型 (如 gemini-1.5-pro)，若未指定则退推至全局默认 (gpt-4o)
-        model_name = os.getenv("OPENAI_VISION_MODEL_NAME", os.getenv("OPENAI_MODEL_NAME", "gpt-4o"))
-        
-        response = client.chat.completions.create(
-            model=model_name,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": content_list}
-            ],
-            temperature=0.2, # 极低的温度，强制视觉大模型保持客观“所见即所得”，避免发散发散思维
-            max_tokens=2048  # 视觉信息量大，需提供足够的 token 空间
-        )
-        visual_insights = response.choices[0].message.content
-        print("  -> [Vision Analyzer Node] Visual extraction successful.")
-        return {"visual_insights": visual_insights}
-    except Exception as e:
-        print(f"  -> [Vision Analyzer Node] Error during Vision API call: {str(e)}")
-        # 依然遵守异常吞并与上抛给 Review 节点的规范
-        return {"visual_insights": f"[系统自动提示]：视觉分析提取失败，Vision LLM 调用异常：{str(e)}"}
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "tavily_search",
+                "description": "If you encounter an unknown image meme, UI, or character, carefully describe its visual features and text, then use this tool to search the internet for its meaning or origin.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string", "description": "The detailed text description of the image to search for, e.g., 'This is fine dog sitting in fire meme meaning'"}},
+                    "required": ["query"]
+                }
+            }
+        }
+    ]
+    
+    print(f"  -> [Vision Analyzer Node] Calling Vision LLM API with {len(keyframes)} frames and ReAct tools...")
+    
+    model_name = os.getenv("OPENAI_VISION_MODEL_NAME", os.getenv("OPENAI_MODEL_NAME", "gpt-4o"))
+    max_tool_calls = 3 # 防止进入工具调用的死循环
+    loop_count = 0
+    
+    while loop_count < max_tool_calls:
+        try:
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=messages, # type: ignore
+                tools=tools, # type: ignore
+                temperature=0.2, # 较低的温度，要求客观识图与决策
+                max_tokens=2048 
+            )
+            response_message = response.choices[0].message
+            
+            # [ReAct] 将模型的回答（哪怕是工具调用意图）忠实地追加进上下文历史
+            messages.append(response_message) # type: ignore
+            
+            if response_message.tool_calls:
+                for tool_call in response_message.tool_calls:
+                    function_name = tool_call.function.name
+                    function_args = json.loads(tool_call.function.arguments)
+                    
+                    print(f"  -> [Vision Analyzer] 🧠 Agent initiated Tool Call: {function_name} with {function_args}")
+                    
+                    # 拦截并在本地执行对应的 Python 工具函数 (基于 Mapping 优雅调度)
+                    handler = AVAILABLE_TOOLS.get(function_name)
+                    if handler:
+                        tool_result = handler(function_args)
+                    else:
+                        tool_result = f"Tool Execution Failed: Unknown tool {function_name}"
+                        
+                    # 将外网获取的真实知识（或失败警告）作为 Tool Message 塞回给大模型
+                    messages.append({ # type: ignore
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "name": function_name,
+                        "content": tool_result
+                    })
+                
+                loop_count += 1
+                # 带着这些新获得的“外挂知识”，继续循环请求大模型，直至它认为资料已充分，可以输出最终的 Markdown 报告
+                continue 
+            else:
+                # 如果没有 tool_calls，说明大模型已经“大彻大悟”，输出了最终的文字报告
+                visual_insights = response_message.content
+                print(f"  -> [Vision Analyzer Node] Visual extraction finished after {loop_count} tool calls.")
+                return {"visual_insights": visual_insights}
+                
+        except Exception as e:
+            print(f"  -> [Vision Analyzer Node] Error during Vision API call: {str(e)}")
+            return {"visual_insights": f"[系统自动提示]：视觉分析提取失败或中途工具调用异常：{str(e)}"}
+            
+    # 如果超过了最大的 ReAct 循环次数，强行兜底退出
+    fallback_content = "[系统自动提示]：视觉分析超时，由于模型陷入频繁查询死循环被强制熔断。请手动简化需求。"
+    # 修复：提取最后一次 response_message (Assistant 角色) 的 content
+    if 'response_message' in locals() and hasattr(response_message, "content") and response_message.content:
+        fallback_content = response_message.content
+
+    return {"visual_insights": fallback_content}
