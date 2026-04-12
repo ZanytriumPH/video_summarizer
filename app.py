@@ -16,6 +16,7 @@ def main():
     with st.sidebar:
         st.header("⚙️ Settings (配置)")
         api_key = st.text_input("OpenAI API Key", type="password")
+        base_url = st.text_input("OpenAI Base URL", value="https://api.openai.com/v1", help="如果您使用的是兼容 OpenAI 格式的中转 API，请在此修改地址。")
         
         # 选择视频来源
         source_type = st.radio("🎬 Video Source (视频来源)", ("YouTube URL", "Local Upload"))
@@ -67,7 +68,7 @@ def main():
                 # 开始处理
                 with st.spinner("Processing video and invoking AI Workflow... This may take a while."):
                     try:
-                        service = VideoSummaryService(api_key)
+                        service = VideoSummaryService(api_key=api_key, base_url=base_url)
                         summary = ""
                         
                         if source_type == "YouTube URL":

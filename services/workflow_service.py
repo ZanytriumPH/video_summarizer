@@ -10,18 +10,21 @@ from core.workflow import summarize_video
 from utils.file_utils import clear_temp_folder
 
 class VideoSummaryService:
-    def __init__(self, api_key: str):
-        # 从环境变量中获取 base_url
-        self.base_url = os.getenv("OPENAI_BASE_URL")
+    def __init__(self, api_key: str, base_url: str = None):
         self.api_key = api_key
+        # 优先使用前端传入的 base_url，如果为空则尝试读取环境变量，最后回退到官方默认地址
+        self.base_url = base_url or os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
         
         # 【环境变量依赖注入】
-        # 将前端传入的 API Key 挂载到环境变量中。
-        # 这是为了确保完全解耦的 LangGraph 内部节点（如 text_analyzer_node）
-        # 可以安全且纯粹地调用 os.getenv("OPENAI_API_KEY") 而无需破坏状态机签名。
+        # 将前端传入的 API Key 和 Base URL 挂载到系统环境变量中。
+        # 这是为了确保完全解耦的 LangGraph 内部节点（如 text_analyzer_node、vision_analyzer_node）
+        # 可以在底层安全且纯粹地调用 os.getenv() 来初始化 OpenAI() 客户端，而无需破坏状态机签名。
         if self.api_key:
             os.environ["OPENAI_API_KEY"] = self.api_key
-
+            
+        if self.base_url:
+            os.environ["OPENAI_BASE_URL"] = self.base_url
+            
         # 核心组件的初始化现在由 langgraph 内部管理
 
     def _process_source(self, source: VideoSource, user_prompt: str = "") -> str:
@@ -30,9 +33,6 @@ class VideoSummaryService:
         1. 使用 VideoSource 获取内容 (Transcript + Frames)
         2. 调用新的工作流进行分析和总结
         """
-        # 在开始前清理临时文件夹
-        clear_temp_folder()
-
         try:
             # 1. 获取内容 (VideoSource 现在是完全独立的)
             transcript, frames = source.process()
@@ -60,6 +60,10 @@ class VideoSummaryService:
         """
         针对 URL 的完整流程。
         """
+        # [生命周期 Bugfix]：必须在实例化 Source (其底层处理器会在 init 时建文件夹) 之前，进行清空操作。
+        # 否则 clear_temp_folder 会把刚建好的 temp/videos 删掉，导致 FileNotFoundError。
+        clear_temp_folder()
+        
         # 创建 Source 实例时传入必要的配置
         source = UrlVideoSource(url, api_key=self.api_key, base_url=self.base_url)
         return self._process_source(source, user_prompt=user_prompt)
@@ -68,6 +72,9 @@ class VideoSummaryService:
         """
         针对上传文件的完整流程。
         """
+        # [生命周期 Bugfix]：必须在实例化 Source 之前进行环境清理。
+        clear_temp_folder()
+
         # 创建 Source 实例时传入必要的配置
         source = LocalFileVideoSource(
             uploaded_file, 

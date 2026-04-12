@@ -1,4 +1,3 @@
-
 from pathlib import Path
 import shutil
 from typing import IO
@@ -31,6 +30,10 @@ class LocalVideoHandler:
         Returns:
             Path: 保存后视频文件的绝对路径。
         """
+        # [防御性编程]：在进行 IO 写入前，再次强制确保目标目录存在。
+        # 防止外部逻辑 (如 clear_temp_folder) 在对象实例化之后、调用 save 之前删除了该文件夹。
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        
         # 创建一个安全的目标文件路径
         # 这里我们简单地加上前缀，实际项目中可能需要更复杂的命名策略（如UUID）
         destination_path = self.output_dir / f"uploaded_{original_filename}"
