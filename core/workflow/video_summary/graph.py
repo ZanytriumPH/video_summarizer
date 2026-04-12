@@ -1,3 +1,4 @@
+from typing import Any, Dict
 from langgraph.graph import StateGraph, START, END
 from core.workflow.video_summary.state import VideoSummaryState
 from core.workflow.video_summary.nodes.text_analyzer import text_analyzer_node
@@ -8,25 +9,33 @@ from core.workflow.video_summary.nodes.fusion_drafter import fusion_drafter_node
 from core.workflow.video_summary.nodes.hallucination_grader import hallucination_grader_node
 from core.workflow.video_summary.nodes.usefulness_grader import usefulness_grader_node
 
-# [Self-RAG 架构升级] 导入新的多级路控体系
-from core.workflow.video_summary.edges.router import route_after_hallucination, route_after_usefulness
+# [Self-RAG 架构升级] 导入新的多级路控体系与消除魔法字符串的常量
+from core.workflow.video_summary.edges.router import (
+    route_after_hallucination, 
+    route_after_usefulness,
+    ROUTE_HAS_HALLUCINATION,
+    ROUTE_NO_HALLUCINATION,
+    ROUTE_NOT_USEFUL,
+    ROUTE_USEFUL
+)
 
-def build_video_summary_graph():
+def build_video_summary_graph() -> StateGraph: # type: ignore
     """
     基于 《多模态视频内容总结 AI 工作流架构设计书》 升级构建的 LangGraph 执行拓扑。
     彻底抛弃了脆弱的单线流转，正式升级为带有 Self-RAG 反思闭环的 Multi-Agent 架构。
     """
     # 1. 初始化 StateGraph，绑定强类型的状态模式 (Schema)
-    workflow = StateGraph(VideoSummaryState)
+    workflow = StateGraph(VideoSummaryState) # type: ignore
 
     # 2. 注册智能体 Worker 节点 (Nodes)
-    workflow.add_node("text_analyzer_node", text_analyzer_node)
-    workflow.add_node("vision_analyzer_node", vision_analyzer_node)
-    workflow.add_node("fusion_drafter_node", fusion_drafter_node)
+    # 使用 type: ignore 来抑制因 LangGraph 底层复杂泛型而产生的静态推断警告
+    workflow.add_node("text_analyzer_node", text_analyzer_node) # type: ignore
+    workflow.add_node("vision_analyzer_node", vision_analyzer_node) # type: ignore
+    workflow.add_node("fusion_drafter_node", fusion_drafter_node) # type: ignore
     
     # 注册双重防护栏评估节点 (Evaluators)
-    workflow.add_node("hallucination_grader_node", hallucination_grader_node)
-    workflow.add_node("usefulness_grader_node", usefulness_grader_node)
+    workflow.add_node("hallucination_grader_node", hallucination_grader_node) # type: ignore
+    workflow.add_node("usefulness_grader_node", usefulness_grader_node) # type: ignore
 
     # 3. 编排拓扑连线 (Edges)
     # 3.1 启动并发提取：START -> (text, vision)
@@ -45,8 +54,8 @@ def build_video_summary_graph():
         "hallucination_grader_node",
         route_after_hallucination,
         {
-            "Has Hallucination": "fusion_drafter_node",  # 存在幻觉，驳回重组
-            "No Hallucination": "usefulness_grader_node" # 事实正确，放行至第二关
+            ROUTE_HAS_HALLUCINATION: "fusion_drafter_node",  # 存在幻觉，驳回重组
+            ROUTE_NO_HALLUCINATION: "usefulness_grader_node" # 事实正确，放行至第二关
         }
     )
 
@@ -55,8 +64,8 @@ def build_video_summary_graph():
         "usefulness_grader_node",
         route_after_usefulness,
         {
-            "Not Useful": "fusion_drafter_node",  # 偏离用户需求，驳回重组
-            "Useful": END                         # 满足一切高压线，正式交付！
+            ROUTE_NOT_USEFUL: "fusion_drafter_node",  # 偏离用户需求，驳回重组
+            ROUTE_USEFUL: END                         # 满足一切高压线，正式交付！
         }
     )
 
