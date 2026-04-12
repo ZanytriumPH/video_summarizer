@@ -6,12 +6,12 @@ from core.extraction.base import VideoSource
 from core.extraction.sources import UrlVideoSource, LocalFileVideoSource
 
 # 【核心改造】引入新的工作流接口，不再需要旧的 analysis 和 generation
-from core.workflow import summarize_video
+from core.workflow import summarize_video, answer_question_at_timestamp
 from core.workflow.session import ensure_thread_id
 from utils.file_utils import clear_temp_folder
 
 class VideoSummaryService:
-    def __init__(self, api_key: str, base_url: str = None):
+    def __init__(self, api_key: str, base_url: Optional[str] = None):
         self.api_key = api_key
         self.last_thread_id = ""
         # 优先使用前端传入的 base_url，如果为空则尝试读取环境变量，最后回退到官方默认地址
@@ -127,4 +127,26 @@ class VideoSummaryService:
             user_prompt=user_prompt,
             status_callback=status_callback,
             thread_id=thread_id
+        )
+
+    def ask_at_timestamp(
+        self,
+        timestamp: str,
+        question: str,
+        thread_id: str = "",
+        window_seconds: int = 20,
+        status_callback: Optional[Callable[[str], None]] = None,
+    ) -> str:
+        """
+        阶段2能力：基于历史 checkpoint 的时间旅行追问。
+        """
+        resolved_thread_id = ensure_thread_id(thread_id or self.last_thread_id)
+        self.last_thread_id = resolved_thread_id
+
+        return answer_question_at_timestamp(
+            thread_id=resolved_thread_id,
+            timestamp=timestamp,
+            question=question,
+            window_seconds=window_seconds,
+            status_callback=status_callback,
         )

@@ -1,7 +1,14 @@
-from typing import List, Dict, Callable, Optional
+import os
+from typing import Any, List, Dict, Callable, Optional
+from openai import OpenAI
 from core.workflow.video_summary.graph import build_video_summary_graph
 from core.workflow.checkpoint_factory import create_checkpointer
 from core.workflow.session import ensure_thread_id
+from core.workflow.time_travel import (
+    parse_timestamp_to_seconds,
+    find_nearest_keyframe,
+    extract_transcript_window,
+)
 from config.settings import CHECKPOINT_BACKEND, CHECKPOINT_DB_URL
 
 def summarize_video(
@@ -93,3 +100,112 @@ def summarize_video(
 
     # 4. 抽取对外唯一关心的最终形态产物
     return current_state.get("draft_summary", "")
+
+
+def answer_question_at_timestamp(
+    thread_id: str,
+    timestamp: str,
+    question: str,
+    window_seconds: int = 20,
+    status_callback: Optional[Callable[[str], None]] = None,
+) -> str:
+    """
+    阶段2入口：基于 checkpoint 的时间旅行追问。
+    输入 thread_id + 时间戳 + 追问问题，返回带证据约束的回答。
+    """
+    if not question or not question.strip():
+        raise ValueError("question is required")
+    if not thread_id or not thread_id.strip():
+        raise ValueError("thread_id is required")
+
+    resolved_thread_id = ensure_thread_id(thread_id)
+    target_seconds = parse_timestamp_to_seconds(timestamp)
+
+    if status_callback:
+        status_callback(f"🕒 [Time Travel] 正在回溯 thread_id={resolved_thread_id} 的历史状态...")
+
+    checkpointer = create_checkpointer(CHECKPOINT_BACKEND, CHECKPOINT_DB_URL)
+    checkpoint = checkpointer.get({"configurable": {"thread_id": resolved_thread_id}})
+
+    if not checkpoint:
+        return (
+            f"[系统提示] 未找到 thread_id={resolved_thread_id} 的历史会话状态。"
+            "请先用同一个 thread_id 跑一次完整视频总结流程。"
+        )
+
+    channel_values = checkpoint.get("channel_values", {}) if isinstance(checkpoint, dict) else {}
+    if not isinstance(channel_values, dict):
+        return "[系统提示] 检索到的会话状态格式异常，无法执行时间旅行追问。"
+
+    transcript = str(channel_values.get("transcript", ""))
+    keyframes = channel_values.get("keyframes", [])
+    draft_summary = str(channel_values.get("draft_summary", ""))
+    user_prompt = str(channel_values.get("user_prompt", ""))
+
+    if not isinstance(keyframes, list):
+        keyframes = []
+
+    nearest_frame = find_nearest_keyframe(keyframes, target_seconds)
+    transcript_window = extract_transcript_window(transcript, target_seconds, window_seconds=window_seconds)
+
+    frame_time = nearest_frame.get("time", "未知") if nearest_frame else "未命中"
+    frame_image_b64 = nearest_frame.get("image", "") if nearest_frame else ""
+
+    if status_callback:
+        status_callback(
+            f"🎯 [Time Travel] 已定位目标窗口 {timestamp} ±{window_seconds}s，最近关键帧时间戳: {frame_time}"
+        )
+
+    # 无 key 时提供可解释降级结果，避免接口报错
+    api_key = os.getenv("OPENAI_API_KEY")
+    base_url = os.getenv("OPENAI_BASE_URL")
+    if not api_key:
+        return (
+            "[系统降级回答]\n"
+            f"- 目标时间戳: {timestamp}\n"
+            f"- 最近关键帧: {frame_time}\n"
+            f"- 语音证据:\n{transcript_window}\n\n"
+            "未配置 OPENAI_API_KEY，当前返回的是证据抽取结果。"
+        )
+
+    client = OpenAI(api_key=api_key, base_url=base_url)
+    model_name = os.getenv("OPENAI_MODEL_NAME", "gpt-4o")
+
+    system_prompt = (
+        "你是一名严谨的视频证据问答助手。"
+        "你只能基于提供的时间窗证据回答，禁止超出证据臆测。"
+        "若证据不足，必须明确说明不足点。"
+    )
+
+    evidence_text = (
+        f"[会话ID] {resolved_thread_id}\n"
+        f"[目标时间戳] {timestamp}\n"
+        f"[时间窗] ±{window_seconds}s\n"
+        f"[最近关键帧时间戳] {frame_time}\n"
+        f"[用户原始总结侧重点] {user_prompt}\n\n"
+        f"[语音证据]\n{transcript_window}\n\n"
+        f"[历史总结草稿摘要]\n{draft_summary[:1500]}"
+    )
+
+    user_content: List[Dict] = [{"type": "text", "text": evidence_text + f"\n\n[追问问题]\n{question}"}]
+    if frame_image_b64:
+        user_content.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{frame_image_b64}", "detail": "auto"},
+            }
+        )
+
+    messages_payload: Any = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_content},
+    ]
+
+    response = client.chat.completions.create(
+        model=model_name,
+        messages=messages_payload,
+        temperature=0.2,
+    )
+
+    answer = response.choices[0].message.content
+    return answer or "[系统提示] 已完成追问，但模型未返回文本内容。"
