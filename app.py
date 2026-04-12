@@ -6,6 +6,18 @@ from services.workflow_service import VideoSummaryService
 # 在应用启动时尝试加载项目根目录的 .env 文件
 load_dotenv()
 
+
+def _init_session_state() -> None:
+    defaults = {
+        "current_summary": "",
+        "active_thread_id": "",
+        "restored_thread_id": "",
+        "time_travel_answer": "",
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
 def main():
     """
     Main entry point for the Streamlit Video Summarizer application.
@@ -13,6 +25,8 @@ def main():
     Sets up the page layout, sidebar inputs for API keys and video URLs,
     and handles the orchestration of video processing and summary display.
     """
+    _init_session_state()
+
     st.set_page_config(layout="wide")
     st.title("多模态智能视频总结 (Video Summarizer)")
 
@@ -46,6 +60,19 @@ def main():
             help="留空则会进行默认的全面综合总结。(Leave blank for a general comprehensive summary.)"
         )
 
+        st.markdown("---")
+        st.header("🧵 Session (会话)")
+        restored_thread_id = st.text_input(
+            "已有 Thread ID（可选）",
+            value=st.session_state.get("restored_thread_id", st.session_state.get("active_thread_id", "")),
+            help="可粘贴历史 thread_id 以继续追问；留空则在首次总结时自动生成。",
+        )
+        if restored_thread_id != st.session_state.get("restored_thread_id", ""):
+            st.session_state["restored_thread_id"] = restored_thread_id
+        if st.button("绑定为当前会话"):
+            st.session_state["active_thread_id"] = restored_thread_id.strip()
+            st.success("当前会话 thread_id 已更新。")
+
         process_button = st.button("🚀 Generate Summary (开始总结)")
 
     # Main content area
@@ -65,6 +92,10 @@ def main():
     # 右侧显示摘要
     with col2:
         st.header("📝 Summary")
+
+        active_thread_id = st.session_state.get("active_thread_id", "")
+        if active_thread_id:
+            st.caption(f"当前会话 Thread ID: {active_thread_id}")
         
         if process_button:
             if not api_key:
@@ -87,13 +118,15 @@ def main():
 
                     try:
                         service = VideoSummaryService(api_key=api_key, base_url=base_url)
+                        active_thread_id = st.session_state.get("active_thread_id", "") or st.session_state.get("restored_thread_id", "")
                         
                         if source_type == "YouTube URL":
                             # 处理 URL
                             summary = service.process_video_from_url(
                                 video_url, 
                                 user_prompt=user_prompt, 
-                                status_callback=update_status_ui
+                                status_callback=update_status_ui,
+                                thread_id=active_thread_id,
                             )
                         else:
                             # 处理上传的文件
@@ -101,8 +134,13 @@ def main():
                                 uploaded_file, 
                                 uploaded_file.name, 
                                 user_prompt=user_prompt, 
-                                status_callback=update_status_ui
+                                status_callback=update_status_ui,
+                                thread_id=active_thread_id,
                             )
+
+                        st.session_state["current_summary"] = summary
+                        st.session_state["active_thread_id"] = service.last_thread_id
+                        st.session_state["restored_thread_id"] = service.last_thread_id
                         
                         status_container.update(
                             label="✅ 全链路执行完毕！所有的细节都逃不过多智能体网络的火眼金睛。", 
@@ -119,7 +157,72 @@ def main():
                     st.markdown(summary)
                     st.balloons() # 加入一点庆祝彩蛋
         else:
-             st.markdown("Summary will appear here after processing...")
+             cached_summary = st.session_state.get("current_summary", "")
+             if cached_summary:
+                 st.markdown(cached_summary)
+             else:
+                 st.markdown("Summary will appear here after processing...")
+
+        st.markdown("---")
+        st.header("⏱️ Time Travel Q&A")
+        active_thread_id = st.session_state.get("active_thread_id", "")
+        if active_thread_id:
+            st.caption(f"追问将使用当前会话 Thread ID: {active_thread_id}")
+        else:
+            st.info("请先完成一次视频总结，或在侧边栏绑定一个已有 thread_id。")
+
+        time_travel_timestamp = st.text_input(
+            "时间戳",
+            value="00:10",
+            help="支持 MM:SS 或 HH:MM:SS，例如 01:30 或 00:14:20。",
+        )
+        time_travel_window = st.slider(
+            "证据窗口（秒）",
+            min_value=5,
+            max_value=60,
+            value=20,
+            step=5,
+        )
+        time_travel_question = st.text_area(
+            "追问问题",
+            placeholder="例如：请解释这个时间点画面中的架构图在表达什么？",
+        )
+
+        ask_button = st.button("🔎 Ask At Timestamp (时间旅行追问)")
+        if ask_button:
+            if not active_thread_id:
+                st.warning("当前没有可用的 thread_id，请先生成总结或绑定历史会话。")
+            elif not time_travel_question.strip():
+                st.warning("请输入追问问题。")
+            else:
+                with st.status("🕒 正在回溯历史状态并抽取目标时间窗证据...", expanded=True) as travel_status:
+                    def update_time_travel_status(msg: str):
+                        travel_status.update(label=msg)
+                        st.write(msg)
+
+                    try:
+                        service = VideoSummaryService(api_key=api_key, base_url=base_url)
+                        answer = service.ask_at_timestamp(
+                            timestamp=time_travel_timestamp,
+                            question=time_travel_question,
+                            thread_id=active_thread_id,
+                            window_seconds=time_travel_window,
+                            status_callback=update_time_travel_status,
+                        )
+                        st.session_state["time_travel_answer"] = answer
+                        travel_status.update(
+                            label="✅ 已完成时间旅行追问。",
+                            state="complete",
+                            expanded=False,
+                        )
+                    except Exception as e:
+                        travel_status.update(label="❌ 时间旅行追问失败", state="error", expanded=True)
+                        st.error(f"追问过程中发生异常: {e}")
+
+        cached_answer = st.session_state.get("time_travel_answer", "")
+        if cached_answer:
+            st.subheader("追问结果")
+            st.markdown(cached_answer)
 
 if __name__ == "__main__":
     main()
