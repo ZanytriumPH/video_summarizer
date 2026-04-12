@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Tuple, List, Dict
+from typing import Tuple, List, Dict, Callable, Optional
 from pathlib import Path
 
 from config.settings import DEFAULT_FRAME_INTERVAL
@@ -19,42 +19,58 @@ class VideoSource(ABC):
         self.transcriber = AudioTranscriber(api_key, base_url=base_url)
 
     @abstractmethod
-    def acquire_video(self) -> Path:
+    def acquire_video(self, status_callback: Optional[Callable[[str], None]] = None) -> Path:
         """
         获取视频文件并返回其本地路径。
         具体子类需实现此方法（如从 URL 下载或保存上传文件）。
         
+        :param status_callback: 用于向前端抛出进度状态的可选回调函数
         Returns:
             Path: 本地视频文件的绝对路径。
         """
         pass
 
-    def process(self) -> Tuple[str, List[Dict]]:
+    def process(self, status_callback: Optional[Callable[[str], None]] = None) -> Tuple[str, List[Dict]]:
         """
         模板方法：执行标准的视频处理流程。
         1. 获取视频 (acquire_video)
         2. 提取音频和关键帧 (self.extractor)
         3. 转录音频 (self.transcriber)
             
+        :param status_callback: 用于向前端抛出进度状态的可选回调函数
         Returns:
             Tuple[str, List[Dict]]: (转录文本, 包含时间戳与 base64 图像的关键帧字典列表)
         """
+        
+        def _notify(msg: str):
+            if status_callback:
+                status_callback(msg)
+            print(msg)
+            
         # 1. 获取视频路径
-        video_path = self.acquire_video()
-        print(f"Video acquired at: {video_path}")
+        _notify("📥 正在获取并保存视频文件...")
+        video_path = self.acquire_video(status_callback)
+        _notify(f"✅ 视频已就绪: {video_path.name}")
 
         # 2. 提取内容
-        print("Extracting audio...")
+        _notify("🎵 正在从视频流中分离音频轨...")
         audio_path = self.extractor.extract_audio(video_path)
-        print(f"Audio extracted to: {audio_path}")
+        if audio_path:
+            _notify("✅ 音频提取成功。")
+        else:
+            _notify("⚠️ 视频无音轨，跳过音频提取。")
 
-        print("Extracting frames...")
+        _notify("🎞️ 正在执行基于直方图对比的智能防抖抽帧...")
         frames = self.extractor.extract_frames(video_path, interval=DEFAULT_FRAME_INTERVAL)
-        print(f"Extracted {len(frames)} frames.")
+        _notify(f"✅ 成功抽取 {len(frames)} 张关键帧画面。")
 
         # 3. 生成转录
-        print("Transcribing audio...")
-        transcript = self.transcriber.transcribe(audio_path)
-        print(f"Transcription complete. Length: {len(transcript)}")
+        transcript = ""
+        if audio_path:
+            _notify("🎙️ 正在调用 Whisper 模型进行高精度语音转录 (这可能需要一些时间)...")
+            transcript = self.transcriber.transcribe(audio_path)
+            _notify(f"✅ 语音转录完成，共提取 {len(transcript)} 个字符。")
+        else:
+            _notify("ℹ️ 无音频，跳过语音转录。")
 
         return transcript, frames

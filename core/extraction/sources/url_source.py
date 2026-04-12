@@ -1,5 +1,5 @@
-
 from pathlib import Path
+from typing import Callable, Optional
 from core.extraction.base import VideoSource
 from core.extraction.infrastructure.video.downloader import VideoDownloader
 
@@ -13,9 +13,13 @@ class UrlVideoSource(VideoSource):
         self.url = url
         self.downloader = VideoDownloader()
 
-    def acquire_video(self) -> Path:
+    def acquire_video(self, status_callback: Optional[Callable[[str], None]] = None) -> Path:
         """
         从 URL 下载视频。
         """
-        print(f"Downloading video from {self.url}...")
+        if status_callback:
+            status_callback(f"🌐 正在突破网络屏障，从远程服务器 {self.url[:30]}... 拉取原始视频流...")
+        else:
+            print(f"Downloading video from {self.url}...")
+            
         return self.downloader.download(self.url)

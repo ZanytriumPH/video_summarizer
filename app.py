@@ -1,6 +1,10 @@
+import os
 import streamlit as st
-import tempfile
+from dotenv import load_dotenv
 from services.workflow_service import VideoSummaryService
+
+# 在应用启动时尝试加载项目根目录的 .env 文件
+load_dotenv()
 
 def main():
     """
@@ -15,8 +19,13 @@ def main():
     # Sidebar for inputs
     with st.sidebar:
         st.header("⚙️ Settings (配置)")
-        api_key = st.text_input("OpenAI API Key", type="password")
-        base_url = st.text_input("OpenAI Base URL", value="https://api.openai.com/v1", help="如果您使用的是兼容 OpenAI 格式的中转 API，请在此修改地址。")
+        
+        # [前端 UX 优化] 自动读取环境变量作为输入框默认值，免除每次重启手填的烦恼
+        default_api_key = os.getenv("OPENAI_API_KEY", "")
+        default_base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+        
+        api_key = st.text_input("OpenAI API Key", value=default_api_key, type="password")
+        base_url = st.text_input("OpenAI Base URL", value=default_base_url, help="如果您使用的是兼容 OpenAI 格式的中转 API，请在此修改地址。")
         
         # 选择视频来源
         source_type = st.radio("🎬 Video Source (视频来源)", ("YouTube URL", "Local Upload"))
@@ -65,23 +74,50 @@ def main():
             elif source_type == "Local Upload" and not uploaded_file:
                 st.warning("Please upload a video file.")
             else:
-                # 开始处理
-                with st.spinner("Processing video and invoking AI Workflow... This may take a while."):
+                summary = "" # 提前初始化以便在外部使用
+                
+                # [状态回传体验跃升] 使用 st.status 作为后台运行日志的容器
+                with st.status("🔄 正在唤醒深度多模态解析引擎，请坐和放宽...", expanded=True) as status_container:
+                    
+                    # 声明一个闭包函数，它会被注入到庞大业务底座的最深处
+                    def update_status_ui(msg: str):
+                        status_container.update(label=msg)
+                        # 在状态面板内部如极客流水线一般打出所有曾执行过的子任务日志
+                        st.write(msg)
+
                     try:
                         service = VideoSummaryService(api_key=api_key, base_url=base_url)
-                        summary = ""
                         
                         if source_type == "YouTube URL":
                             # 处理 URL
-                            summary = service.process_video_from_url(video_url, user_prompt=user_prompt)
+                            summary = service.process_video_from_url(
+                                video_url, 
+                                user_prompt=user_prompt, 
+                                status_callback=update_status_ui
+                            )
                         else:
                             # 处理上传的文件
-                            # uploaded_file 是一个 BytesIO 对象，包含 name 属性
-                            summary = service.process_uploaded_video(uploaded_file, uploaded_file.name, user_prompt=user_prompt)
+                            summary = service.process_uploaded_video(
+                                uploaded_file, 
+                                uploaded_file.name, 
+                                user_prompt=user_prompt, 
+                                status_callback=update_status_ui
+                            )
                         
-                        st.markdown(summary)
+                        status_container.update(
+                            label="✅ 全链路执行完毕！所有的细节都逃不过多智能体网络的火眼金睛。", 
+                            state="complete", 
+                            expanded=False # 执行完毕后自动收起流水线日志，腾出屏幕空间
+                        )
+                        
                     except Exception as e:
-                        st.error(f"An error occurred: {e}")
+                        status_container.update(label="❌ 系统异常，流水线熔断", state="error", expanded=True)
+                        st.error(f"处理过程中发生严重异常: {e}")
+                        
+                # 【前端排版解耦】将最终的 Markdown 总结报告独立在外部主视觉区渲染
+                if summary:
+                    st.markdown(summary)
+                    st.balloons() # 加入一点庆祝彩蛋
         else:
              st.markdown("Summary will appear here after processing...")
 

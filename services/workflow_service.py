@@ -1,5 +1,5 @@
 import os
-from typing import IO
+from typing import IO, Callable, Optional
 
 # 引入抽象层和具体策略
 from core.extraction.base import VideoSource
@@ -27,7 +27,7 @@ class VideoSummaryService:
             
         # 核心组件的初始化现在由 langgraph 内部管理
 
-    def _process_source(self, source: VideoSource, user_prompt: str = "") -> str:
+    def _process_source(self, source: VideoSource, user_prompt: str = "", status_callback: Optional[Callable[[str], None]] = None) -> str:
         """
         统一的内部处理逻辑：
         1. 使用 VideoSource 获取内容 (Transcript + Frames)
@@ -35,20 +35,30 @@ class VideoSummaryService:
         """
         try:
             # 1. 获取内容 (VideoSource 现在是完全独立的)
-            transcript, frames = source.process()
+            # [前端透传] 将来自 UI 的回调函数注入到底层的抽取生命周期中
+            transcript, frames = source.process(status_callback=status_callback)
 
             # 2. 【核心改造】调用新的、符合架构的 summarize_video 函数
+            if status_callback:
+                status_callback("🔗 音频底模与关键帧视觉流预处理成功。多模态数据已向 AI 并发流水线集结。")
+                
             print("Invoking AI workflow...")
             
             # 如果用户未输入提示，则使用架构默认的综合总结提示
             if not user_prompt or not user_prompt.strip():
                 user_prompt = "请结合画面与语音，给出一个全面、客观的高质量视频总结。"
                 
+            # [前端透传] 将 UI 回调函数挂载进 LangGraph 执行总线上
             summary = summarize_video(
                 transcript=transcript,
                 keyframes=frames,
-                user_prompt=user_prompt
+                user_prompt=user_prompt,
+                status_callback=status_callback
             )
+            
+            if status_callback:
+                status_callback("🎉 LangGraph 复杂的自反思闭环流转结束。一份完美的报告已送达交付点！")
+                
             print("Workflow complete.")
             
             return summary
@@ -56,7 +66,7 @@ class VideoSummaryService:
             # 在结束后清理，确保不留垃圾文件
             clear_temp_folder()
 
-    def process_video_from_url(self, url: str, user_prompt: str = "") -> str:
+    def process_video_from_url(self, url: str, user_prompt: str = "", status_callback: Optional[Callable[[str], None]] = None) -> str:
         """
         针对 URL 的完整流程。
         """
@@ -66,15 +76,15 @@ class VideoSummaryService:
         
         # 创建 Source 实例时传入必要的配置
         source = UrlVideoSource(url, api_key=self.api_key, base_url=self.base_url)
-        return self._process_source(source, user_prompt=user_prompt)
+        return self._process_source(source, user_prompt=user_prompt, status_callback=status_callback)
 
-    def process_uploaded_video(self, uploaded_file: IO[bytes], original_filename: str, user_prompt: str = "") -> str:
+    def process_uploaded_video(self, uploaded_file: IO[bytes], original_filename: str, user_prompt: str = "", status_callback: Optional[Callable[[str], None]] = None) -> str:
         """
         针对上传文件的完整流程。
         """
         # [生命周期 Bugfix]：必须在实例化 Source 之前进行环境清理。
         clear_temp_folder()
-
+        
         # 创建 Source 实例时传入必要的配置
         source = LocalFileVideoSource(
             uploaded_file, 
@@ -82,4 +92,4 @@ class VideoSummaryService:
             api_key=self.api_key, 
             base_url=self.base_url
         )
-        return self._process_source(source, user_prompt=user_prompt)
+        return self._process_source(source, user_prompt=user_prompt, status_callback=status_callback)
