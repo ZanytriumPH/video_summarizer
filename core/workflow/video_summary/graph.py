@@ -24,7 +24,40 @@ from core.workflow.video_summary.edges.router import (
     ROUTE_USEFUL
 )
 
-def build_video_summary_graph(checkpointer: Any = None) -> Any:
+CONCURRENCY_MODE_THREADPOOL = "threadpool"
+CONCURRENCY_MODE_SEND_API = "send_api"
+
+
+def _add_chunk_pipeline_for_threadpool(workflow: StateGraph) -> None:
+    """
+    当前稳定路径：图级并行 + 节点内 ThreadPoolExecutor。
+    """
+    workflow.add_edge(START, "chunk_planner_node")
+    workflow.add_edge("chunk_planner_node", "map_dispatch_node")
+
+    workflow.add_edge("map_dispatch_node", "chunk_audio_node")
+    workflow.add_edge("map_dispatch_node", "chunk_vision_node")
+
+    workflow.add_edge("chunk_audio_node", "chunk_synthesizer_node")
+    workflow.add_edge("chunk_vision_node", "chunk_synthesizer_node")
+
+
+def _add_chunk_pipeline_for_send_api_scaffold(workflow: StateGraph) -> None:
+    """
+    方案B阶段1：Send API 拓扑骨架。
+    当前先保持与 threadpool 同拓扑，后续阶段再替换成真正的 Send fan-out。
+    """
+    workflow.add_edge(START, "chunk_planner_node")
+    workflow.add_edge("chunk_planner_node", "map_dispatch_node")
+
+    workflow.add_edge("map_dispatch_node", "chunk_audio_node")
+    workflow.add_edge("map_dispatch_node", "chunk_vision_node")
+
+    workflow.add_edge("chunk_audio_node", "chunk_synthesizer_node")
+    workflow.add_edge("chunk_vision_node", "chunk_synthesizer_node")
+
+
+def build_video_summary_graph(checkpointer: Any = None, concurrency_mode: str = CONCURRENCY_MODE_THREADPOOL) -> Any:
     """
     基于 《多模态视频内容总结 AI 工作流架构设计书》 升级构建的 LangGraph 执行拓扑。
     彻底抛弃了脆弱的单线流转，正式升级为带有 Self-RAG 反思闭环的 Multi-Agent 架构。
@@ -48,19 +81,12 @@ def build_video_summary_graph(checkpointer: Any = None) -> Any:
     workflow.add_node("usefulness_grader_node", usefulness_grader_node) # type: ignore
 
     # 3. 编排拓扑连线 (Edges)
-    # 3.1 迭代 A：先执行分片计划与分发准备
-    workflow.add_edge(START, "chunk_planner_node")
-    workflow.add_edge("chunk_planner_node", "map_dispatch_node")
-
-    # 3.2 迭代 B 强化：并行执行 chunk_audio 与 chunk_vision 分析器
-    # 新的并行拓扑：map_dispatch → {chunk_audio, chunk_vision} 并行 → chunk_synthesizer
-    # LangGraph 会自动使用 chunk_results 上的 reducer 函数合并两个并行分支的更新
-    workflow.add_edge("map_dispatch_node", "chunk_audio_node")
-    workflow.add_edge("map_dispatch_node", "chunk_vision_node")
-    
-    # 两个分析器的结果会在这里汇聚（fan-in），chunk_results 通过 reducer 自动合并
-    workflow.add_edge("chunk_audio_node", "chunk_synthesizer_node")
-    workflow.add_edge("chunk_vision_node", "chunk_synthesizer_node")
+    # 3.1 方案B阶段1：根据并发模式选择图骨架（默认 threadpool）
+    normalized_mode = (concurrency_mode or CONCURRENCY_MODE_THREADPOOL).strip().lower()
+    if normalized_mode == CONCURRENCY_MODE_SEND_API:
+        _add_chunk_pipeline_for_send_api_scaffold(workflow)
+    else:
+        _add_chunk_pipeline_for_threadpool(workflow)
 
     # 3.3 迭代 C 预留：全局分析与融合阶段开始
     # chunk_synthesizer 汇聚了并行音视频分片分析的成果，准备进入全局分析链路

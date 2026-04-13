@@ -41,3 +41,37 @@ MAP_MAX_PARALLELISM = int(os.getenv("MAP_MAX_PARALLELISM", "4"))
 # 5.3 Map-Reduce（迭代 B）配置
 CHUNK_MAX_TOOL_CALLS = int(os.getenv("CHUNK_MAX_TOOL_CALLS", "2"))
 ENABLE_CHUNK_CACHE = os.getenv("ENABLE_CHUNK_CACHE", "true").strip().lower() in {"1", "true", "yes", "on"}
+
+# 方案B阶段2：运行指标采样配置
+ENABLE_METRICS_LOGGING = os.getenv("ENABLE_METRICS_LOGGING", "true").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+METRICS_SAMPLE_RATE = float(os.getenv("METRICS_SAMPLE_RATE", "1.0"))
+if METRICS_SAMPLE_RATE < 0:
+    METRICS_SAMPLE_RATE = 0.0
+if METRICS_SAMPLE_RATE > 1:
+    METRICS_SAMPLE_RATE = 1.0
+
+# 并发模式配置（方案B阶段1：内部开关，不暴露前端）
+SUPPORTED_CONCURRENCY_MODES = {"threadpool", "send_api"}
+CONCURRENCY_MODE = os.getenv("CONCURRENCY_MODE", "threadpool").strip().lower()
+if CONCURRENCY_MODE not in SUPPORTED_CONCURRENCY_MODES:
+    print(
+        f"[settings] Invalid CONCURRENCY_MODE='{CONCURRENCY_MODE}', fallback to 'threadpool'."
+    )
+    CONCURRENCY_MODE = "threadpool"
+
+
+def resolve_concurrency_mode(mode: str = "") -> str:
+    """
+    解析并规范化并发模式。
+    - 传入空值时回退到全局配置 CONCURRENCY_MODE
+    - 非法值统一降级为 threadpool
+    """
+    candidate = (mode or CONCURRENCY_MODE).strip().lower()
+    if candidate in SUPPORTED_CONCURRENCY_MODES:
+        return candidate
+    return "threadpool"

@@ -1,4 +1,6 @@
 import os
+import time
+import random
 from typing import IO, Callable, Optional
 
 # 引入抽象层和具体策略
@@ -9,6 +11,8 @@ from core.extraction.sources import UrlVideoSource, LocalFileVideoSource
 from core.workflow import summarize_video, answer_question_at_timestamp
 from core.workflow.session import ensure_thread_id
 from utils.file_utils import clear_temp_folder
+from utils.logger import setup_logger, log_metric_event
+from config.settings import ENABLE_METRICS_LOGGING, METRICS_SAMPLE_RATE
 
 class VideoSummaryService:
     def __init__(self, api_key: str, base_url: Optional[str] = None):
@@ -28,6 +32,7 @@ class VideoSummaryService:
             os.environ["OPENAI_BASE_URL"] = self.base_url
             
         # 核心组件的初始化现在由 langgraph 内部管理
+        self.metrics_logger = setup_logger("video_summarizer.metrics")
 
     def _process_source(
         self,
@@ -41,10 +46,23 @@ class VideoSummaryService:
         1. 使用 VideoSource 获取内容 (Transcript + Frames)
         2. 调用新的工作流进行分析和总结
         """
+        metrics_enabled = ENABLE_METRICS_LOGGING and random.random() <= METRICS_SAMPLE_RATE
+        process_started_at = time.perf_counter()
         try:
             # 1. 获取内容 (VideoSource 现在是完全独立的)
             # [前端透传] 将来自 UI 的回调函数注入到底层的抽取生命周期中
+            extraction_started_at = time.perf_counter()
             transcript, frames = source.process(status_callback=status_callback)
+            extraction_ms = int((time.perf_counter() - extraction_started_at) * 1000)
+
+            if metrics_enabled:
+                log_metric_event(
+                    self.metrics_logger,
+                    "service_extraction_finished",
+                    transcript_chars=len(transcript),
+                    keyframes_count=len(frames),
+                    extraction_duration_ms=extraction_ms,
+                )
 
             # 2. 【核心改造】调用新的、符合架构的 summarize_video 函数
             if status_callback:
@@ -60,6 +78,7 @@ class VideoSummaryService:
             resolved_thread_id = ensure_thread_id(thread_id)
             self.last_thread_id = resolved_thread_id
 
+            workflow_started_at = time.perf_counter()
             summary = summarize_video(
                 transcript=transcript,
                 keyframes=frames,
@@ -67,6 +86,16 @@ class VideoSummaryService:
                 status_callback=status_callback,
                 thread_id=resolved_thread_id
             )
+            workflow_ms = int((time.perf_counter() - workflow_started_at) * 1000)
+
+            if metrics_enabled:
+                log_metric_event(
+                    self.metrics_logger,
+                    "service_workflow_finished",
+                    thread_id=resolved_thread_id,
+                    workflow_duration_ms=workflow_ms,
+                    summary_chars=len(summary),
+                )
             
             if status_callback:
                 status_callback("🎉 LangGraph 复杂的自反思闭环流转结束。一份完美的报告已送达交付点！")
@@ -75,6 +104,15 @@ class VideoSummaryService:
             
             return summary
         finally:
+            if metrics_enabled:
+                total_ms = int((time.perf_counter() - process_started_at) * 1000)
+                log_metric_event(
+                    self.metrics_logger,
+                    "service_process_finished",
+                    thread_id=self.last_thread_id,
+                    total_duration_ms=total_ms,
+                )
+
             # 在结束后清理，确保不留垃圾文件
             clear_temp_folder()
 

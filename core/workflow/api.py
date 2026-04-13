@@ -1,4 +1,7 @@
 import os
+import time
+import random
+import json
 from typing import Any, List, Dict, Callable, Optional
 from openai import OpenAI
 from core.workflow.video_summary.graph import build_video_summary_graph
@@ -9,7 +12,15 @@ from core.workflow.time_travel import (
     find_nearest_keyframe,
     extract_transcript_window,
 )
-from config.settings import CHECKPOINT_BACKEND, CHECKPOINT_DB_URL
+from config.settings import (
+    CHECKPOINT_BACKEND,
+    CHECKPOINT_DB_URL,
+    CONCURRENCY_MODE,
+    resolve_concurrency_mode,
+    ENABLE_METRICS_LOGGING,
+    METRICS_SAMPLE_RATE,
+)
+from utils.logger import setup_logger, log_metric_event
 
 
 def _build_time_travel_fallback_response(
@@ -31,7 +42,8 @@ def summarize_video(
     keyframes: List[Dict], 
     user_prompt: str = "请结合画面与语音，给出一个全面、客观的高质量视频总结。",
     status_callback: Optional[Callable[[str], None]] = None,
-    thread_id: str = ""
+    thread_id: str = "",
+    concurrency_mode: str = "",
 ) -> str:
     """
     外部调用接口：启动多模态视频总结工作流。
@@ -47,13 +59,40 @@ def summarize_video(
     if status_callback:
         status_callback("⚙️ [LangGraph 初始化] 正在编排多智能体认知状态机网络...")
 
+    metrics_enabled = ENABLE_METRICS_LOGGING and random.random() <= METRICS_SAMPLE_RATE
+    metrics_logger = setup_logger("video_summarizer.metrics")
+    run_started_at = time.perf_counter()
+
     # 1. 获取已编译的工作流引擎（第一阶段：接入 checkpointer）
     checkpointer = create_checkpointer(CHECKPOINT_BACKEND, CHECKPOINT_DB_URL)
-    workflow_app = build_video_summary_graph(checkpointer=checkpointer)
+    resolved_mode = resolve_concurrency_mode(concurrency_mode or CONCURRENCY_MODE)
+    workflow_app = build_video_summary_graph(
+        checkpointer=checkpointer,
+        concurrency_mode=resolved_mode,
+    )
     resolved_thread_id = ensure_thread_id(thread_id)
 
     if status_callback:
         status_callback(f"🧵 [Session] 当前会话 thread_id: {resolved_thread_id}")
+        status_callback(f"🛠️ [Concurrency] 当前并发模式: {resolved_mode}")
+
+    if metrics_enabled:
+        keyframes_estimate_bytes = 0
+        try:
+            keyframes_estimate_bytes = len(json.dumps(keyframes, ensure_ascii=False).encode("utf-8"))
+        except Exception:
+            keyframes_estimate_bytes = 0
+
+        log_metric_event(
+            metrics_logger,
+            "workflow_started",
+            thread_id=resolved_thread_id,
+            concurrency_mode=resolved_mode,
+            transcript_chars=len(transcript),
+            keyframes_count=len(keyframes),
+            keyframes_estimate_bytes=keyframes_estimate_bytes,
+            user_prompt_chars=len(user_prompt),
+        )
     
     # 2. 构造符合 VideoSummaryState 契约的初始状态
     initial_state = {
@@ -94,6 +133,8 @@ def summarize_video(
 
     # 维护一个局部字典缓冲区，用来组装流星碎片式返回的状态片段
     current_state = initial_state.copy()
+    previous_event_at = run_started_at
+    node_event_counts: Dict[str, int] = {}
     
     # stream_mode="updates" 会在每一个图节点执行完毕后，将它吐出的局部更新 `dict` yield 出来
     for output in workflow_app.stream(
@@ -102,8 +143,27 @@ def summarize_video(
         stream_mode="updates"
     ):
         for node_name, state_update in output.items():
+            event_now = time.perf_counter()
+            since_previous_ms = int((event_now - previous_event_at) * 1000)
+            node_event_counts[node_name] = node_event_counts.get(node_name, 0) + 1
+
             # 实时更新缓冲区状态
             current_state.update(state_update)
+
+            if metrics_enabled:
+                chunk_results = current_state.get("chunk_results", [])
+                chunk_count = len(chunk_results) if isinstance(chunk_results, list) else 0
+                log_metric_event(
+                    metrics_logger,
+                    "workflow_node_update",
+                    thread_id=resolved_thread_id,
+                    concurrency_mode=resolved_mode,
+                    node_name=node_name,
+                    node_event_count=node_event_counts[node_name],
+                    since_previous_event_ms=since_previous_ms,
+                    chunk_count=chunk_count,
+                )
+            previous_event_at = event_now
             
             # 若前端注册了回调函数，且该节点是我们关注的核心智能体，则向外抛出事件信号
             if status_callback and node_name in node_msg_map:
@@ -139,7 +199,30 @@ def summarize_video(
                     status_callback(f"🚨 [系统驳回] 草稿偏离了您的核心输入诉求。已生成定点修改指令打回重做...")
 
     # 4. 抽取对外唯一关心的最终形态产物
-    return current_state.get("draft_summary", "")
+    summary = current_state.get("draft_summary", "")
+
+    if metrics_enabled:
+        final_state_estimate_bytes = 0
+        try:
+            final_state_estimate_bytes = len(json.dumps(current_state, ensure_ascii=False, default=str).encode("utf-8"))
+        except Exception:
+            final_state_estimate_bytes = 0
+
+        total_duration_ms = int((time.perf_counter() - run_started_at) * 1000)
+        log_metric_event(
+            metrics_logger,
+            "workflow_finished",
+            thread_id=resolved_thread_id,
+            concurrency_mode=resolved_mode,
+            total_duration_ms=total_duration_ms,
+            node_count=len(node_event_counts),
+            node_event_counts=node_event_counts,
+            revision_count=current_state.get("revision_count", 0),
+            summary_chars=len(summary),
+            final_state_estimate_bytes=final_state_estimate_bytes,
+        )
+
+    return summary
 
 
 def answer_question_at_timestamp(
