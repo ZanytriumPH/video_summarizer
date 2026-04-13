@@ -106,7 +106,7 @@ class TestChunkVisionAnalyzerNode(unittest.TestCase):
     @patch("core.workflow.video_summary.nodes.chunk_vision_analyzer.ThreadPoolExecutor")
     @patch("core.workflow.video_summary.nodes.chunk_vision_analyzer._process_single_chunk_vision")
     def test_parallel_execution_reduces_runtime(self, mock_process, mock_executor_cls, mock_as_completed):
-        mock_process.side_effect = lambda chunk_id, frame_indexes, keyframes, user_prompt, base_item: (
+        mock_process.side_effect = lambda chunk_id, frame_indexes, keyframes, keyframes_base_path, user_prompt, base_item: (
             chunk_id,
             {
                 "chunk_id": chunk_id,

@@ -9,6 +9,7 @@ from openai import OpenAI
 from config.settings import CHUNK_MAX_TOOL_CALLS, ENABLE_CHUNK_CACHE, MAP_MAX_PARALLELISM
 from core.workflow.video_summary.state import VideoSummaryState
 from core.workflow.video_summary.tools.search_tools import execute_tavily_search
+from core.workflow.video_summary.utils.frame_utils import resolve_frame_image_base64
 
 _VISION_SEARCH_CACHE: Dict[str, str] = {}
 _VISION_SEARCH_CACHE_LOCK = threading.Lock()
@@ -81,6 +82,7 @@ def _process_single_chunk_vision(
     chunk_id: str,
     frame_indexes: List[int],
     keyframes: List[FramePayload],
+    keyframes_base_path: str,
     user_prompt: str,
     base_item: ChunkResult,
 ) -> tuple[str, ChunkResult]:
@@ -92,7 +94,9 @@ def _process_single_chunk_vision(
             continue
         frame = keyframes[idx]
         if isinstance(frame, dict):
-            selected_frames.append(frame)
+            normalized_frame = dict(frame)
+            normalized_frame["image"] = resolve_frame_image_base64(frame, keyframes_base_path)
+            selected_frames.append(normalized_frame)
 
     if not selected_frames:
         insights = f"[chunk={chunk_id}] 无可用关键帧证据。"
@@ -140,6 +144,7 @@ def _process_single_chunk_vision(
 def chunk_vision_analyzer_node(state: VideoSummaryState) -> dict:
     chunk_plan = state.get("chunk_plan", [])
     keyframes = state.get("keyframes", [])
+    keyframes_base_path = str(state.get("keyframes_base_path", ""))
     user_prompt = state.get("user_prompt", "")
 
     if not isinstance(chunk_plan, list) or not chunk_plan:
@@ -174,6 +179,7 @@ def chunk_vision_analyzer_node(state: VideoSummaryState) -> dict:
                 chunk_id,
                 frame_indexes,
                 keyframes,
+                keyframes_base_path,
                 user_prompt,
                 result_map.get(chunk_id, {"chunk_id": chunk_id}),
             )

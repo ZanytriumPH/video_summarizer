@@ -90,6 +90,7 @@ class VideoSummaryState(TypedDict):
     # 输入层数据
     transcript: str                 # 视频语音识别文本 (ASR/Whisper 输出)
     keyframes: List[Dict]           # 关键帧列表，包含 base64 数据及时间戳：[{"time": "00:15", "image": "base64_str"}]
+    keyframes_base_path: str        # 关键帧文件引用模式下的根目录（用于 frame_file 解析）
     user_prompt: str                # 用户具体的总结侧重点
     
     # 中间态数据

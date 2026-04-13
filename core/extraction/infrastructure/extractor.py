@@ -4,7 +4,14 @@ import math
 from pathlib import Path
 from typing import Optional
 from moviepy.video.io.VideoFileClip import VideoFileClip
-from config.settings import TEMP_AUDIO_DIR, MAX_IMAGE_SIZE
+from config.settings import (
+    TEMP_AUDIO_DIR,
+    TEMP_FRAMES_DIR,
+    MAX_IMAGE_SIZE,
+    ENABLE_KEYFRAME_FILE_REFERENCE,
+    KEYFRAME_REFERENCE_INCLUDE_INLINE_IMAGE,
+    KEYFRAME_IMAGE_EXTENSION,
+)
 
 class MediaExtractor:
     def __init__(self, audio_dir: Path = TEMP_AUDIO_DIR):
@@ -142,8 +149,12 @@ class MediaExtractor:
                 last_hist = current_hist
                 last_extracted_time = current_time
 
-                # 编码为 Base64
-                _, buffer = cv2.imencode('.jpg', image)
+                ext = KEYFRAME_IMAGE_EXTENSION if KEYFRAME_IMAGE_EXTENSION in {"jpg", "jpeg", "png"} else "jpg"
+                ok, buffer = cv2.imencode(f".{ext}", image)
+                if not ok:
+                    frame_count += 1
+                    continue
+
                 jpg_as_text = base64.b64encode(buffer).decode('utf-8')
                 
                 # 计算时间戳并格式化为 HH:MM:SS 或 MM:SS
@@ -156,10 +167,25 @@ class MediaExtractor:
                 else:
                     time_str = f"{minutes:02d}:{seconds:02d}"
                 
-                frames.append({
-                    "time": time_str,
-                    "image": jpg_as_text
-                })
+                frame_payload = {"time": time_str}
+
+                if ENABLE_KEYFRAME_FILE_REFERENCE:
+                    TEMP_FRAMES_DIR.mkdir(parents=True, exist_ok=True)
+                    frame_filename = f"{video_path.stem}_{total_seconds:08d}_{len(frames):04d}.{ext}"
+                    frame_file_path = TEMP_FRAMES_DIR / frame_filename
+                    try:
+                        frame_file_path.write_bytes(buffer.tobytes())
+                        frame_payload["frame_file"] = frame_filename
+                    except Exception:
+                        # 文件落盘失败时回退内联，保证主流程不中断。
+                        frame_payload["image"] = jpg_as_text
+
+                    if KEYFRAME_REFERENCE_INCLUDE_INLINE_IMAGE:
+                        frame_payload["image"] = jpg_as_text
+                else:
+                    frame_payload["image"] = jpg_as_text
+
+                frames.append(frame_payload)
                 
             frame_count += 1
 

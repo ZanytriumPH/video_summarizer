@@ -3,6 +3,7 @@ import json
 from openai import OpenAI
 from core.workflow.video_summary.state import VideoSummaryState
 from core.workflow.video_summary.tools.search_tools import execute_tavily_search
+from core.workflow.video_summary.utils.frame_utils import resolve_frame_image_base64
 
 # [重构优化] 引入 Tool Handler Mapping (策略模式)，彻底消除僵硬的 if-else 分支
 AVAILABLE_TOOLS = {
@@ -15,6 +16,7 @@ def vision_analyzer_node(state: VideoSummaryState) -> dict:
     调用多模态大模型，传入 keyframes，并赋予模型“以图生文再搜索”的工具调用能力。
     """
     keyframes = state.get("keyframes", [])
+    keyframes_base_path = state.get("keyframes_base_path", "")
     user_prompt = state.get("user_prompt", "")
     
     if not keyframes:
@@ -49,7 +51,7 @@ def vision_analyzer_node(state: VideoSummaryState) -> dict:
     
     for frame in keyframes:
         time_str = frame.get("time", "未知时间")
-        base64_img = frame.get("image", "")
+        base64_img = resolve_frame_image_base64(frame, str(keyframes_base_path)) if isinstance(frame, dict) else ""
         if not base64_img:
             continue
         content_list.append({"type": "text", "text": f"--- 当前画面时间戳: [{time_str}] ---"})

@@ -55,6 +55,18 @@ if METRICS_SAMPLE_RATE < 0:
 if METRICS_SAMPLE_RATE > 1:
     METRICS_SAMPLE_RATE = 1.0
 
+# 方案B阶段3：keyframes 引用化 PoC 配置（默认关闭，保持兼容）
+ENABLE_KEYFRAME_FILE_REFERENCE = os.getenv("ENABLE_KEYFRAME_FILE_REFERENCE", "false").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+KEYFRAME_REFERENCE_INCLUDE_INLINE_IMAGE = os.getenv(
+    "KEYFRAME_REFERENCE_INCLUDE_INLINE_IMAGE", "false"
+).strip().lower() in {"1", "true", "yes", "on"}
+KEYFRAME_IMAGE_EXTENSION = os.getenv("KEYFRAME_IMAGE_EXTENSION", "jpg").strip().lower() or "jpg"
+
 # 并发模式配置（方案B阶段1：内部开关，不暴露前端）
 SUPPORTED_CONCURRENCY_MODES = {"threadpool", "send_api"}
 CONCURRENCY_MODE = os.getenv("CONCURRENCY_MODE", "threadpool").strip().lower()

@@ -19,8 +19,10 @@ from config.settings import (
     resolve_concurrency_mode,
     ENABLE_METRICS_LOGGING,
     METRICS_SAMPLE_RATE,
+    TEMP_FRAMES_DIR,
 )
 from utils.logger import setup_logger, log_metric_event
+from core.workflow.video_summary.utils.frame_utils import resolve_frame_image_base64
 
 
 def _build_time_travel_fallback_response(
@@ -98,6 +100,7 @@ def summarize_video(
     initial_state = {
         "transcript": transcript,
         "keyframes": keyframes,
+        "keyframes_base_path": str(TEMP_FRAMES_DIR),
         "user_prompt": user_prompt,
         "text_insights": "",
         "visual_insights": "",
@@ -262,6 +265,7 @@ def answer_question_at_timestamp(
 
     transcript = str(channel_values.get("transcript", ""))
     keyframes = channel_values.get("keyframes", [])
+    keyframes_base_path = str(channel_values.get("keyframes_base_path", ""))
     draft_summary = str(channel_values.get("draft_summary", ""))
     user_prompt = str(channel_values.get("user_prompt", ""))
 
@@ -272,7 +276,9 @@ def answer_question_at_timestamp(
     transcript_window = extract_transcript_window(transcript, target_seconds, window_seconds=window_seconds)
 
     frame_time = nearest_frame.get("time", "未知") if nearest_frame else "未命中"
-    frame_image_b64 = nearest_frame.get("image", "") if nearest_frame else ""
+    frame_image_b64 = (
+        resolve_frame_image_base64(nearest_frame, keyframes_base_path) if isinstance(nearest_frame, dict) else ""
+    )
 
     if status_callback:
         status_callback(
