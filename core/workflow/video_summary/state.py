@@ -9,6 +9,13 @@ class VideoSummaryState(TypedDict):
     # 中间态数据
     text_insights: str              # 语音文本的提炼结果
     visual_insights: str            # 关键帧画面的动作/图表解析结果
+
+    # 5.3 Map-Reduce（迭代 A）中间态
+    video_duration_seconds: int     # 推断出的视频总时长（秒）
+    chunk_plan: List[Dict]          # 分片计划
+    chunk_results: List[Dict]       # 分片执行结果（迭代 B/C 填充）
+    chunk_retry_count: Dict         # 分片重试计数
+    reduce_debug_info: Dict         # Reduce 阶段调试元信息
     
     # 输出与循环控制
     draft_summary: str              # 当前生成的融合总结草稿
