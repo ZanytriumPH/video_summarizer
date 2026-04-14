@@ -1,4 +1,5 @@
 import os
+import json
 import streamlit as st
 from dotenv import load_dotenv
 from services.workflow_service import VideoSummaryService
@@ -128,9 +129,55 @@ def main():
                 
                 # [状态回传体验跃升] 使用 st.status 作为后台运行日志的容器
                 with st.status("🔄 正在唤醒深度多模态解析引擎，请坐和放宽...", expanded=True) as status_container:
+                    progress_header = st.empty()
+                    audio_progress_text = st.empty()
+                    audio_progress_bar = st.progress(0)
+                    vision_progress_text = st.empty()
+                    vision_progress_bar = st.progress(0)
+                    overall_progress_text = st.empty()
+                    overall_progress_bar = st.progress(0)
+
+                    progress_header.info("分片进度面板：等待任务开始...")
+                    audio_progress_text.write("音频分片：0/0")
+                    vision_progress_text.write("视觉分片：0/0")
+                    overall_progress_text.write("总体进度：0/0 (0%)")
                     
                     # 声明一个闭包函数，它会被注入到庞大业务底座的最深处
                     def update_status_ui(msg: str):
+                        if isinstance(msg, str) and msg.startswith("[[PROGRESS]]"):
+                            payload_raw = msg[len("[[PROGRESS]]"):]
+                            try:
+                                payload = json.loads(payload_raw)
+                            except Exception:
+                                return
+
+                            if not isinstance(payload, dict):
+                                return
+
+                            if str(payload.get("type", "")).strip() != "chunk_progress":
+                                return
+
+                            total_chunks = int(payload.get("total_chunks", 0) or 0)
+                            audio_done = int(payload.get("audio_done", 0) or 0)
+                            vision_done = int(payload.get("vision_done", 0) or 0)
+                            overall_done = int(payload.get("overall_done", 0) or 0)
+                            overall_total = int(payload.get("overall_total", 0) or 0)
+                            overall_percent = int(payload.get("overall_percent", 0) or 0)
+
+                            audio_percent = int((audio_done / total_chunks) * 100) if total_chunks > 0 else 0
+                            vision_percent = int((vision_done / total_chunks) * 100) if total_chunks > 0 else 0
+
+                            progress_header.info("分片进度面板：Send API 实时 fan-out/fan-in")
+                            audio_progress_text.write(f"音频分片：{audio_done}/{total_chunks} ({audio_percent}%)")
+                            audio_progress_bar.progress(max(0, min(100, audio_percent)))
+                            vision_progress_text.write(f"视觉分片：{vision_done}/{total_chunks} ({vision_percent}%)")
+                            vision_progress_bar.progress(max(0, min(100, vision_percent)))
+                            overall_progress_text.write(
+                                f"总体进度：{overall_done}/{overall_total} ({max(0, min(100, overall_percent))}%)"
+                            )
+                            overall_progress_bar.progress(max(0, min(100, overall_percent)))
+                            return
+
                         status_container.update(label=msg)
                         # 在状态面板内部如极客流水线一般打出所有曾执行过的子任务日志
                         st.write(msg)

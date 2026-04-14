@@ -137,10 +137,43 @@ def summarize_video(
         "usefulness_grader_node": "🎯 [Usefulness Guard] 正在从挑剔的 C-level 视角评估当前的总结草稿是否真正命中了您的原始痛点诉求..."
     }
 
+    def _emit_chunk_progress(
+        total_chunks: int,
+        audio_done_ids: set[str],
+        vision_done_ids: set[str],
+        stage: str = "running",
+    ) -> None:
+        if not status_callback:
+            return
+
+        safe_total = max(0, total_chunks)
+        audio_done = len(audio_done_ids)
+        vision_done = len(vision_done_ids)
+        overall_total = safe_total * 2
+        overall_done = audio_done + vision_done
+        overall_percent = int((overall_done / overall_total) * 100) if overall_total > 0 else 0
+
+        payload = {
+            "type": "chunk_progress",
+            "stage": stage,
+            "concurrency_mode": resolved_mode,
+            "total_chunks": safe_total,
+            "audio_done": audio_done,
+            "vision_done": vision_done,
+            "overall_done": overall_done,
+            "overall_total": overall_total,
+            "overall_percent": overall_percent,
+        }
+        status_callback(f"[[PROGRESS]]{json.dumps(payload, ensure_ascii=False)}")
+
     # 维护一个局部字典缓冲区，用来组装流星碎片式返回的状态片段
     current_state = initial_state.copy()
     previous_event_at = run_started_at
     node_event_counts: Dict[str, int] = {}
+    audio_done_ids: set[str] = set()
+    vision_done_ids: set[str] = set()
+    total_chunks = 0
+    last_progress_signature: tuple[int, int, int] = (-1, -1, -1)
     
     # stream_mode="updates" 会在每一个图节点执行完毕后，将它吐出的局部更新 `dict` yield 出来
     for output in workflow_app.stream(
@@ -155,6 +188,29 @@ def summarize_video(
 
             # 实时更新缓冲区状态
             current_state.update(state_update)
+
+            chunk_plan = current_state.get("chunk_plan", [])
+            if isinstance(chunk_plan, list):
+                total_chunks = len(chunk_plan)
+
+            if resolved_mode == "send_api" and node_name in {"chunk_audio_worker_node", "chunk_vision_worker_node"}:
+                updated_chunks = state_update.get("chunk_results", []) if isinstance(state_update, dict) else []
+                if isinstance(updated_chunks, list):
+                    for chunk_item in updated_chunks:
+                        if not isinstance(chunk_item, dict):
+                            continue
+                        chunk_id = str(chunk_item.get("chunk_id", "")).strip()
+                        if not chunk_id:
+                            continue
+                        if str(chunk_item.get("audio_insights", "")).strip():
+                            audio_done_ids.add(chunk_id)
+                        if str(chunk_item.get("vision_insights", "")).strip():
+                            vision_done_ids.add(chunk_id)
+
+                progress_signature = (total_chunks, len(audio_done_ids), len(vision_done_ids))
+                if progress_signature != last_progress_signature:
+                    _emit_chunk_progress(total_chunks, audio_done_ids, vision_done_ids, stage="running")
+                    last_progress_signature = progress_signature
 
             if metrics_enabled:
                 chunk_results = current_state.get("chunk_results", [])
@@ -203,6 +259,9 @@ def summarize_video(
                     status_callback(f"🚨 [系统熔断] 幻觉评分器刚刚挫败了一次模型捏造事实的行为！正在带参打回重建...")
                 elif node_name == "usefulness_grader_node" and current_state.get("usefulness_score") == "no":
                     status_callback(f"🚨 [系统驳回] 草稿偏离了您的核心输入诉求。已生成定点修改指令打回重做...")
+
+    if resolved_mode == "send_api":
+        _emit_chunk_progress(total_chunks, audio_done_ids, vision_done_ids, stage="finished")
 
     # 4. 抽取对外唯一关心的最终形态产物
     summary = current_state.get("draft_summary", "")
