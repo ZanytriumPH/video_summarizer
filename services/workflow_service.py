@@ -39,7 +39,8 @@ class VideoSummaryService:
         source: VideoSource,
         user_prompt: str = "",
         status_callback: Optional[Callable[[str], None]] = None,
-        thread_id: str = ""
+        thread_id: str = "",
+        concurrency_mode: str = "",
     ) -> str:
         """
         统一的内部处理逻辑：
@@ -84,7 +85,8 @@ class VideoSummaryService:
                 keyframes=frames,
                 user_prompt=user_prompt,
                 status_callback=status_callback,
-                thread_id=resolved_thread_id
+                thread_id=resolved_thread_id,
+                concurrency_mode=concurrency_mode,
             )
             workflow_ms = int((time.perf_counter() - workflow_started_at) * 1000)
 
@@ -121,7 +123,8 @@ class VideoSummaryService:
         url: str,
         user_prompt: str = "",
         status_callback: Optional[Callable[[str], None]] = None,
-        thread_id: str = ""
+        thread_id: str = "",
+        concurrency_mode: str = "",
     ) -> str:
         """
         针对 URL 的完整流程。
@@ -136,7 +139,8 @@ class VideoSummaryService:
             source,
             user_prompt=user_prompt,
             status_callback=status_callback,
-            thread_id=thread_id
+            thread_id=thread_id,
+            concurrency_mode=concurrency_mode,
         )
 
     def process_uploaded_video(
@@ -145,7 +149,8 @@ class VideoSummaryService:
         original_filename: str,
         user_prompt: str = "",
         status_callback: Optional[Callable[[str], None]] = None,
-        thread_id: str = ""
+        thread_id: str = "",
+        concurrency_mode: str = "",
     ) -> str:
         """
         针对上传文件的完整流程。
@@ -164,7 +169,8 @@ class VideoSummaryService:
             source,
             user_prompt=user_prompt,
             status_callback=status_callback,
-            thread_id=thread_id
+            thread_id=thread_id,
+            concurrency_mode=concurrency_mode,
         )
 
     def ask_at_timestamp(

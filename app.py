@@ -3,6 +3,12 @@ import streamlit as st
 from dotenv import load_dotenv
 from services.workflow_service import VideoSummaryService
 
+
+SUPPORTED_CONCURRENCY_MODES = {
+    "threadpool": "ThreadPool（稳定默认）",
+    "send_api": "Send API（图级 fan-out 试点）",
+}
+
 # 在应用启动时尝试加载项目根目录的 .env 文件
 load_dotenv()
 
@@ -58,6 +64,19 @@ def main():
             "您希望 AI 侧重总结什么内容？ (What would you like the AI to focus on?)", 
             placeholder="例如：请侧重于分析视频中产品演示的具体操作步骤和图表数据...",
             help="留空则会进行默认的全面综合总结。(Leave blank for a general comprehensive summary.)"
+        )
+
+        st.markdown("---")
+        st.header("🧠 Concurrency (并行模式)")
+        env_mode = os.getenv("CONCURRENCY_MODE", "threadpool").strip().lower()
+        if env_mode not in SUPPORTED_CONCURRENCY_MODES:
+            env_mode = "threadpool"
+        concurrency_mode = st.selectbox(
+            "选择并行模式",
+            options=list(SUPPORTED_CONCURRENCY_MODES.keys()),
+            index=list(SUPPORTED_CONCURRENCY_MODES.keys()).index(env_mode),
+            format_func=lambda mode: SUPPORTED_CONCURRENCY_MODES.get(mode, mode),
+            help="threadpool 为稳定默认模式；send_api 为图级 fan-out 试点模式。",
         )
 
         st.markdown("---")
@@ -127,6 +146,7 @@ def main():
                                 user_prompt=user_prompt, 
                                 status_callback=update_status_ui,
                                 thread_id=active_thread_id,
+                                concurrency_mode=concurrency_mode,
                             )
                         else:
                             # 处理上传的文件
@@ -136,6 +156,7 @@ def main():
                                 user_prompt=user_prompt, 
                                 status_callback=update_status_ui,
                                 thread_id=active_thread_id,
+                                concurrency_mode=concurrency_mode,
                             )
 
                         st.session_state["current_summary"] = summary
