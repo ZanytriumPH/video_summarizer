@@ -16,8 +16,7 @@ def hallucination_grader_node(state: VideoSummaryState) -> dict:
     :return: dict 更新 hallucination_score 和 feedback_instructions
     """
     draft = state.get("draft_summary", "")
-    text_insights = state.get("text_insights", "")
-    visual_insights = state.get("visual_insights", "")
+    aggregated_chunk_insights = state.get("aggregated_chunk_insights", "")
     revision_count = state.get("revision_count", 0)
 
     # 1. 熔断防死循环
@@ -43,10 +42,11 @@ def hallucination_grader_node(state: VideoSummaryState) -> dict:
         "3. \"reason\": 字符串，如果存在幻觉，请给出极其精确的切除指令（例如：'请立即删掉关于 React 状态管理的解读，因为画面和语音只展示了最终效果，纯属大模型脑补'）；如果没有幻觉，置为空字符串 \"\"。"
     )
 
+    evidence_sources = str(aggregated_chunk_insights).strip()
+
     user_content = (
         f"====== 事实核查源数据 (Truth Sources) ======\n"
-        f"【听觉侧】：\n{text_insights}\n\n"
-        f"【视觉侧】：\n{visual_insights}\n"
+        f"{evidence_sources}\n"
         f"========================================\n\n"
         f"【待严格审查的总结草稿】：\n{draft}"
     )

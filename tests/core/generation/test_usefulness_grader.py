@@ -21,8 +21,6 @@ class TestUsefulnessGraderNode(unittest.TestCase):
             "keyframes": [],
             "user_prompt": "侧重芯片性能的描述",
             "draft_summary": "这是一款很棒的手机，性能很强。",
-            "text_insights": "",
-            "visual_insights": "",
             "revision_count": 0,
             "hallucination_score": "no",  # 前置条件：已通过幻觉审查
             "usefulness_score": "",

@@ -95,8 +95,7 @@ class VideoSummaryState(TypedDict):
     user_prompt: str                # 用户具体的总结侧重点
     
     # 中间态数据
-    text_insights: str              # 语音文本的提炼结果
-    visual_insights: str            # 关键帧画面的动作/图表解析结果
+    aggregated_chunk_insights: str  # 聚合后的分片洞察（供最终 drafter 输入）
 
     # 5.3 Map-Reduce（迭代 A）中间态
     video_duration_seconds: int     # 推断出的视频总时长（秒）

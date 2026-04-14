@@ -103,8 +103,7 @@ def summarize_video(
         "keyframes_base_path": str(TEMP_FRAMES_DIR),
         "concurrency_mode": resolved_mode,
         "user_prompt": user_prompt,
-        "text_insights": "",
-        "visual_insights": "",
+        "aggregated_chunk_insights": "",
         "draft_summary": "",
         "hallucination_score": "",
         "usefulness_score": "",
@@ -131,10 +130,9 @@ def summarize_video(
         "chunk_synthesizer_worker_node": "⚡ [Chunk Synthesizer Send Worker] 图级 fan-out：正在处理单分片融合总结...",
         "chunk_synthesizer_node": "⚡ [Chunk Synthesizer] 并行汇聚：将分片级音视频洞察实时融合为中间层 chunk_summary...",
         
-        # 全局分析层 (Global Analysis)
-        "text_analyzer_node": "🧠 [Audio Agent] 并发线程：正在利用大模型深入梳理数千字的全局语音逐字稿...",
-        "vision_analyzer_node": "👁️ [Vision Agent] 并发线程：正将全部关键帧特征灌入视觉模型以提取全局图文细节...",
-        "fusion_drafter_node": "🧩 [Synthesizer Agent] 正在根据分片 chunk_summary 与全局洞察，融合缝合并起草最终报告...",
+        # 全局整理层 (Global Aggregation & Draft)
+        "chunk_aggregator_node": "🧾 [Chunk Aggregator] 正在按时间线整合 n 个分片洞察，生成统一证据底稿...",
+        "fusion_drafter_node": "🧩 [Synthesizer Agent] 正在基于聚合证据底稿，起草最终报告...",
         "hallucination_grader_node": "⚖️ [Hallucination Guard] 启动 SSCD 时空对抗防御网，正在对草稿中的每一个数据源进行反向核查...",
         "usefulness_grader_node": "🎯 [Usefulness Guard] 正在从挑剔的 C-level 视角评估当前的总结草稿是否真正命中了您的原始痛点诉求..."
     }

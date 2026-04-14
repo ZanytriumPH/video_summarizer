@@ -4,17 +4,16 @@ from core.workflow.video_summary.state import VideoSummaryState
 
 def fusion_drafter_node(state: VideoSummaryState) -> dict:
     """
-    核心的“组装节点” (Synthesizer)。
-    接收并汇聚来自并行层的 text_insights 和 visual_insights，根据时间戳或逻辑相关性进行“图文对齐”。
-    生成结构化的综合 draft_summary。
+    核心的“成文节点” (Drafter)。
+    接收上游聚合节点输出的 aggregated_chunk_insights，
+    负责将结构化证据整理为最终高质量总结。
     [Self-RAG 升级]: 如果存在反馈意见 (feedback_instructions)，则必须结合修改意见重新生成修正版草稿。
     
     :param state: VideoSummaryState
     :return: dict 包含更新的 draft_summary 和增加的 revision_count
     """
     current_count = state.get("revision_count", 0)
-    text_insights = state.get("text_insights", "")
-    visual_insights = state.get("visual_insights", "")
+    aggregated_chunk_insights = state.get("aggregated_chunk_insights", "")
     user_prompt = state.get("user_prompt", "")
     feedback_instructions = state.get("feedback_instructions", "")
 
@@ -27,15 +26,15 @@ def fusion_drafter_node(state: VideoSummaryState) -> dict:
         
     client = OpenAI(api_key=api_key, base_url=base_url)
 
-    # 2. 构造 System Prompt (基于架构设计：强调图文对齐)
+    # 2. 构造 System Prompt（聚合输入 -> 最终成文）
     system_prompt = (
-        "你是一个顶级的多模态视频内容综合编辑与深度报告撰写专家。\n"
-        "由于视频的语音和画面是被并行分离提取的，你的核心任务是将【纯文本提炼分析（听觉侧）】与【关键帧多模态分析（视觉侧）】进行完美的“图文对齐”与“逻辑融合”，"
-        "最终生成一份高质量、连贯且逻辑自洽的视频深度总结报告。\n\n"
+        "你是一个顶级的视频内容编辑与深度报告撰写专家。\n"
+        "你的输入是按时间片聚合后的多模态证据（Chunk Aggregated Insights）。"
+        "你的任务是基于这些证据生成一份高质量、连贯且逻辑自洽的视频总结报告。\n\n"
         "【架构级约束指令】：\n"
-        "1. 🔗 强制图文对齐：请敏锐地寻找听觉分析与视觉分析在时间线（如 [00:15]）或逻辑上的交叉点。必须采用“图文结合”的叙述方式，例如：“在讲解 XXX 概念时，画面同步展示了 YYY 走势图或操作界面”，绝不能孤立地将文字和画面分两块罗列。\n"
-        "2. 🚫 消除认知矛盾：如果发现文本分析和视觉分析存在细微出入（如发音识别错误但画面正确），请以符合客观常理和画面事实的方式进行中和纠正。\n"
-        "3. 📝 专业排版规范：输出必须使用易于阅读的 Markdown 语法。建议包含：【内容导读】、【核心图文融合解析（按大纲展开）】、【关键金句摘录】、【总结与升华】等模块。"
+        "1. 🔗 证据优先：仅允许使用输入证据中的信息，不得补造事实。\n"
+        "2. 🧭 时间一致性：尽量保持时间线顺序与逻辑衔接，必要时指出跨片段关联。\n"
+        "3. 📝 专业排版规范：输出必须使用易于阅读的 Markdown 语法。建议包含：【内容导读】、【核心内容解析】、【关键结论】、【总结与建议】等模块。"
     )
 
     # 3. [Self-RAG 升级] 双重评分机制介入
@@ -51,11 +50,10 @@ def fusion_drafter_node(state: VideoSummaryState) -> dict:
     # 4. 组装 User Content
     user_content = (
         f"【用户期望的总结侧重点】：\n{user_prompt}\n\n"
-        f"【听觉侧 - 文本提炼分析】：\n{text_insights}\n\n"
-        f"【视觉侧 - 关键帧多模态分析】：\n{visual_insights}"
+        f"【分片聚合证据（唯一输入）】：\n{aggregated_chunk_insights}"
     )
 
-    print(f"  -> [Fusion Drafter Node] Synthesizing parallel insights into Draft (Revision {current_count + 1})...")
+    print(f"  -> [Fusion Drafter Node] Drafting final report from aggregated chunk insights (Revision {current_count + 1})...")
 
     # 5. 执行 API 调用
     try:

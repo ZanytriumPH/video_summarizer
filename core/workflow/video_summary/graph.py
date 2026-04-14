@@ -12,8 +12,7 @@ from core.workflow.video_summary.nodes.map_dispatcher import (
 from core.workflow.video_summary.nodes.chunk_audio_analyzer import chunk_audio_analyzer_node, chunk_audio_worker_node
 from core.workflow.video_summary.nodes.chunk_vision_analyzer import chunk_vision_analyzer_node, chunk_vision_worker_node
 from core.workflow.video_summary.nodes.chunk_synthesizer import chunk_synthesizer_node, chunk_synthesizer_worker_node
-from core.workflow.video_summary.nodes.text_analyzer import text_analyzer_node
-from core.workflow.video_summary.nodes.vision_analyzer import vision_analyzer_node
+from core.workflow.video_summary.nodes.chunk_aggregator import chunk_aggregator_node
 from core.workflow.video_summary.nodes.fusion_drafter import fusion_drafter_node
 
 # [Self-RAG 架构升级] 导入新拆分的双重独立审查节点
@@ -85,8 +84,7 @@ def build_video_summary_graph(checkpointer: Any = None, concurrency_mode: str = 
     workflow.add_node("chunk_vision_worker_node", chunk_vision_worker_node) # type: ignore
     workflow.add_node("chunk_synthesizer_worker_node", chunk_synthesizer_worker_node) # type: ignore
     workflow.add_node("chunk_synthesizer_node", chunk_synthesizer_node) # type: ignore
-    workflow.add_node("text_analyzer_node", text_analyzer_node) # type: ignore
-    workflow.add_node("vision_analyzer_node", vision_analyzer_node) # type: ignore
+    workflow.add_node("chunk_aggregator_node", chunk_aggregator_node) # type: ignore
     workflow.add_node("fusion_drafter_node", fusion_drafter_node) # type: ignore
     
     # 注册双重防护栏评估节点 (Evaluators)
@@ -101,14 +99,9 @@ def build_video_summary_graph(checkpointer: Any = None, concurrency_mode: str = 
     else:
         _add_chunk_pipeline_for_threadpool(workflow)
 
-    # 3.3 迭代 C 预留：全局分析与融合阶段开始
-    # chunk_synthesizer 汇聚了并行音视频分片分析的成果，准备进入全局分析链路
-    workflow.add_edge("chunk_synthesizer_node", "text_analyzer_node")
-    workflow.add_edge("chunk_synthesizer_node", "vision_analyzer_node")
-
-    # 3.4 汇聚 (Fan-in)：并发处理结束后统一流入 Drafter 进行时空组合
-    workflow.add_edge("text_analyzer_node", "fusion_drafter_node")
-    workflow.add_edge("vision_analyzer_node", "fusion_drafter_node")
+    # 3.3 迭代 C：先聚合分片洞察，再交由 Drafter 成文
+    workflow.add_edge("chunk_synthesizer_node", "chunk_aggregator_node")
+    workflow.add_edge("chunk_aggregator_node", "fusion_drafter_node")
 
     # 3.5 组装完毕后，立刻进入第一道质量防线：检查是否无中生有 (幻觉)
     workflow.add_edge("fusion_drafter_node", "hallucination_grader_node")

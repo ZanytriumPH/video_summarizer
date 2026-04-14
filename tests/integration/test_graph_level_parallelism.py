@@ -418,8 +418,6 @@ class TestGraphParallelismIntegration(unittest.TestCase):
             "transcript": '{"segments": []}',
             "keyframes": [],
             "user_prompt": "summarize",
-            "text_insights": "",
-            "visual_insights": "",
             "video_duration_seconds": 300,
             "chunk_plan": [
                 {"chunk_id": f"c{i}", "start_sec": i*100, "end_sec": (i+1)*100}

@@ -3,7 +3,6 @@ from unittest.mock import patch, MagicMock
 import os
 import sys
 from pathlib import Path
-import base64
 from dotenv import load_dotenv
 
 # 将项目根目录添加到 sys.path
@@ -11,8 +10,6 @@ project_root = Path(os.path.abspath(os.path.join(os.path.dirname(__file__), '..'
 sys.path.insert(0, str(project_root))
 
 from core.workflow.video_summary.state import VideoSummaryState
-from core.workflow.video_summary.nodes.text_analyzer import text_analyzer_node
-from core.workflow.video_summary.nodes.vision_analyzer import vision_analyzer_node
 from core.workflow.video_summary.nodes.fusion_drafter import fusion_drafter_node
 
 env_path = project_root / '.env'
@@ -28,8 +25,7 @@ class TestFusionDrafterNode(unittest.TestCase):
         self.valid_state: VideoSummaryState = {
             "transcript": "",
             "keyframes": [],
-            "text_insights": "核心观点：苹果发布了新款 iPhone。金句：这是迄今为止最伟大的产品。",
-            "visual_insights": "[00:15] PPT上显示了 A17 芯片的性能提升 20%。\n[00:30] 演讲者展示了钛金属外壳。",
+            "aggregated_chunk_insights": "## chunk-000 [00:00 - 00:30]\n### chunk_summary\n苹果发布了新款 iPhone。\n### audio_insights\n强调 A17 芯片性能。\n### vision_insights\n展示钛金属外壳。",
             "user_prompt": "侧重芯片性能",
             "draft_summary": "",
             "revision_count": 0,
@@ -83,42 +79,28 @@ class TestFusionDrafterNode(unittest.TestCase):
     def test_fusion_drafter_integration(self):
         """
         集成测试：真实的 API 级联调用验证。
-        从 test_output 中读取提取层产生的真实转录文本和抽帧图片，
-        按顺序执行 text_analyzer -> vision_analyzer -> fusion_drafter 的完整数据链。
-        并将最终的草稿报告持久化保存到 test_output 的新文件夹中。
+        基于聚合节点产出的 aggregated_chunk_insights 执行真实 API 生成。
+        并将最终草稿报告持久化保存到 test_output 目录供人工复核。
         """
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             self.skipTest("OPENAI_API_KEY not found. Skipping integration test.")
             
-        output_dir = project_root / "test_output" / "test_local_source_integration"
-        transcript_path = output_dir / "transcript.txt"
-        frames_dir = output_dir / "frames"
-        
-        if not transcript_path.exists() or not frames_dir.exists():
-            self.skipTest("Integration test data not found in test_output. Please run test_local_source_integration.py first to generate local test data.")
-            
-        with open(transcript_path, "r", encoding="utf-8") as f:
-            transcript = f.read()
-            
-        keyframes = []
-        # 只取前 2 张图，为了节省自动化测试的运行时间和 API Token 成本
-        for img_path in sorted(frames_dir.glob("*.jpg"))[:2]:
-            time_str = "00:00"
-            parts = img_path.stem.split("_")
-            if len(parts) >= 3:
-                time_str = parts[2].replace("-", ":")
-                
-            with open(img_path, "rb") as img_f:
-                b64_data = base64.b64encode(img_f.read()).decode("utf-8")
-                keyframes.append({"time": time_str, "image": b64_data})
-                
-        # 初始化符合架构的 State
         state: VideoSummaryState = {
-            "transcript": transcript,
-            "keyframes": keyframes,
-            "text_insights": "",
-            "visual_insights": "",
+            "transcript": "",
+            "keyframes": [],
+            "aggregated_chunk_insights": (
+                "## chunk-000 [00:00 - 00:30]\n"
+                "### chunk_summary\n"
+                "视频开场介绍产品发布背景，强调新款手机定位。\n"
+                "### audio_insights\n"
+                "演讲者聚焦处理器性能与能效提升。\n"
+                "### vision_insights\n"
+                "PPT 展示性能曲线和材质对比图。\n\n"
+                "## chunk-001 [00:30 - 01:00]\n"
+                "### chunk_summary\n"
+                "进入功能演示，突出实际使用体验。"
+            ),
             "draft_summary": "",
             "user_prompt": "这是一次自动化的集成测试，请尽量简短地将画面和文字结合进行总结。",
             "revision_count": 0,
@@ -126,20 +108,8 @@ class TestFusionDrafterNode(unittest.TestCase):
             "hallucination_score": "",
             "usefulness_score": ""
         }
-        
-        # 1. 生成 Text Insights
-        print("\n--- [Integration] Running Text Analyzer Node ---")
-        text_result = text_analyzer_node(state)
-        self.assertIn("text_insights", text_result)
-        state.update(text_result)
-        
-        # 2. 生成 Visual Insights
-        print("\n--- [Integration] Running Vision Analyzer Node ---")
-        vision_result = vision_analyzer_node(state)
-        self.assertIn("visual_insights", vision_result)
-        state.update(vision_result)
-        
-        # 3. 融合生成 Draft
+
+        # 1. 融合生成 Draft
         print("\n--- [Integration] Running Fusion Drafter Node ---")
         fusion_result = fusion_drafter_node(state)
         
@@ -152,11 +122,8 @@ class TestFusionDrafterNode(unittest.TestCase):
         
         draft_path = save_dir / "draft_summary.md"
         with open(draft_path, "w", encoding="utf-8") as f:
-            # 同时将文字提炼和视觉提炼也附加上去，方便对照审查
-            f.write("# 听觉侧洞察 (Text Insights)\n")
-            f.write(state.get("text_insights", "") + "\n\n")
-            f.write("# 视觉侧洞察 (Visual Insights)\n")
-            f.write(state.get("visual_insights", "") + "\n\n")
+            f.write("# 分片聚合洞察 (Aggregated Chunk Insights)\n")
+            f.write(state.get("aggregated_chunk_insights", "") + "\n\n")
             f.write("# 最终合成草稿 (Generated Draft)\n")
             f.write(draft)
             

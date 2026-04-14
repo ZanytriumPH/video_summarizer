@@ -41,6 +41,7 @@ MAP_MAX_PARALLELISM = int(os.getenv("MAP_MAX_PARALLELISM", "4"))
 # 5.3 Map-Reduce（迭代 B）配置
 CHUNK_MAX_TOOL_CALLS = int(os.getenv("CHUNK_MAX_TOOL_CALLS", "2"))
 ENABLE_CHUNK_CACHE = os.getenv("ENABLE_CHUNK_CACHE", "true").strip().lower() in {"1", "true", "yes", "on"}
+AGGREGATED_CHUNK_INSIGHTS_MAX_CHARS = int(os.getenv("AGGREGATED_CHUNK_INSIGHTS_MAX_CHARS", "24000"))
 
 # 方案B阶段2：运行指标采样配置
 ENABLE_METRICS_LOGGING = os.getenv("ENABLE_METRICS_LOGGING", "true").strip().lower() in {
