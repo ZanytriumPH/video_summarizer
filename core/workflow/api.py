@@ -127,6 +127,8 @@ def summarize_video(
         "chunk_audio_worker_node": "🎧 [Chunk Audio Send Worker] 图级 fan-out：正在处理单分片音频洞察...",
         "chunk_vision_node": "📸 [Chunk Vision Micro-Agent] 并行通道：正同步对应时间片的关键帧进行视觉特征提取与图表解析...",
         "chunk_vision_worker_node": "📸 [Chunk Vision Send Worker] 图级 fan-out：正在处理单分片视觉洞察...",
+        "synthesis_barrier_node": "🧱 [Synthesis Barrier] 正在等待音视频分片证据全部汇聚，准备进入融合分发路由...",
+        "chunk_synthesizer_worker_node": "⚡ [Chunk Synthesizer Send Worker] 图级 fan-out：正在处理单分片融合总结...",
         "chunk_synthesizer_node": "⚡ [Chunk Synthesizer] 并行汇聚：将分片级音视频洞察实时融合为中间层 chunk_summary...",
         
         # 全局分析层 (Global Analysis)
@@ -141,6 +143,7 @@ def summarize_video(
         total_chunks: int,
         audio_done_ids: set[str],
         vision_done_ids: set[str],
+        synthesis_done_ids: set[str],
         stage: str = "running",
     ) -> None:
         if not status_callback:
@@ -149,8 +152,9 @@ def summarize_video(
         safe_total = max(0, total_chunks)
         audio_done = len(audio_done_ids)
         vision_done = len(vision_done_ids)
-        overall_total = safe_total * 2
-        overall_done = audio_done + vision_done
+        synthesis_done = len(synthesis_done_ids)
+        overall_total = safe_total * 3
+        overall_done = audio_done + vision_done + synthesis_done
         overall_percent = int((overall_done / overall_total) * 100) if overall_total > 0 else 0
 
         payload = {
@@ -160,6 +164,7 @@ def summarize_video(
             "total_chunks": safe_total,
             "audio_done": audio_done,
             "vision_done": vision_done,
+            "synthesis_done": synthesis_done,
             "overall_done": overall_done,
             "overall_total": overall_total,
             "overall_percent": overall_percent,
@@ -172,8 +177,9 @@ def summarize_video(
     node_event_counts: Dict[str, int] = {}
     audio_done_ids: set[str] = set()
     vision_done_ids: set[str] = set()
+    synthesis_done_ids: set[str] = set()
     total_chunks = 0
-    last_progress_signature: tuple[int, int, int] = (-1, -1, -1)
+    last_progress_signature: tuple[int, int, int, int] = (-1, -1, -1, -1)
     
     # stream_mode="updates" 会在每一个图节点执行完毕后，将它吐出的局部更新 `dict` yield 出来
     for output in workflow_app.stream(
@@ -193,7 +199,11 @@ def summarize_video(
             if isinstance(chunk_plan, list):
                 total_chunks = len(chunk_plan)
 
-            if resolved_mode == "send_api" and node_name in {"chunk_audio_worker_node", "chunk_vision_worker_node"}:
+            if resolved_mode == "send_api" and node_name in {
+                "chunk_audio_worker_node",
+                "chunk_vision_worker_node",
+                "chunk_synthesizer_worker_node",
+            }:
                 updated_chunks = state_update.get("chunk_results", []) if isinstance(state_update, dict) else []
                 if isinstance(updated_chunks, list):
                     for chunk_item in updated_chunks:
@@ -206,10 +216,23 @@ def summarize_video(
                             audio_done_ids.add(chunk_id)
                         if str(chunk_item.get("vision_insights", "")).strip():
                             vision_done_ids.add(chunk_id)
+                        if str(chunk_item.get("chunk_summary", "")).strip():
+                            synthesis_done_ids.add(chunk_id)
 
-                progress_signature = (total_chunks, len(audio_done_ids), len(vision_done_ids))
+                progress_signature = (
+                    total_chunks,
+                    len(audio_done_ids),
+                    len(vision_done_ids),
+                    len(synthesis_done_ids),
+                )
                 if progress_signature != last_progress_signature:
-                    _emit_chunk_progress(total_chunks, audio_done_ids, vision_done_ids, stage="running")
+                    _emit_chunk_progress(
+                        total_chunks,
+                        audio_done_ids,
+                        vision_done_ids,
+                        synthesis_done_ids,
+                        stage="running",
+                    )
                     last_progress_signature = progress_signature
 
             if metrics_enabled:
@@ -261,7 +284,13 @@ def summarize_video(
                     status_callback(f"🚨 [系统驳回] 草稿偏离了您的核心输入诉求。已生成定点修改指令打回重做...")
 
     if resolved_mode == "send_api":
-        _emit_chunk_progress(total_chunks, audio_done_ids, vision_done_ids, stage="finished")
+        _emit_chunk_progress(
+            total_chunks,
+            audio_done_ids,
+            vision_done_ids,
+            synthesis_done_ids,
+            stage="finished",
+        )
 
     # 4. 抽取对外唯一关心的最终形态产物
     summary = current_state.get("draft_summary", "")

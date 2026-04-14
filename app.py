@@ -134,12 +134,15 @@ def main():
                     audio_progress_bar = st.progress(0)
                     vision_progress_text = st.empty()
                     vision_progress_bar = st.progress(0)
+                    synthesis_progress_text = st.empty()
+                    synthesis_progress_bar = st.progress(0)
                     overall_progress_text = st.empty()
                     overall_progress_bar = st.progress(0)
 
                     progress_header.info("分片进度面板：等待任务开始...")
                     audio_progress_text.write("音频分片：0/0")
                     vision_progress_text.write("视觉分片：0/0")
+                    synthesis_progress_text.write("融合分片：0/0")
                     overall_progress_text.write("总体进度：0/0 (0%)")
                     
                     # 声明一个闭包函数，它会被注入到庞大业务底座的最深处
@@ -160,18 +163,24 @@ def main():
                             total_chunks = int(payload.get("total_chunks", 0) or 0)
                             audio_done = int(payload.get("audio_done", 0) or 0)
                             vision_done = int(payload.get("vision_done", 0) or 0)
+                            synthesis_done = int(payload.get("synthesis_done", 0) or 0)
                             overall_done = int(payload.get("overall_done", 0) or 0)
                             overall_total = int(payload.get("overall_total", 0) or 0)
                             overall_percent = int(payload.get("overall_percent", 0) or 0)
 
                             audio_percent = int((audio_done / total_chunks) * 100) if total_chunks > 0 else 0
                             vision_percent = int((vision_done / total_chunks) * 100) if total_chunks > 0 else 0
+                            synthesis_percent = int((synthesis_done / total_chunks) * 100) if total_chunks > 0 else 0
 
                             progress_header.info("分片进度面板：Send API 实时 fan-out/fan-in")
                             audio_progress_text.write(f"音频分片：{audio_done}/{total_chunks} ({audio_percent}%)")
                             audio_progress_bar.progress(max(0, min(100, audio_percent)))
                             vision_progress_text.write(f"视觉分片：{vision_done}/{total_chunks} ({vision_percent}%)")
                             vision_progress_bar.progress(max(0, min(100, vision_percent)))
+                            synthesis_progress_text.write(
+                                f"融合分片：{synthesis_done}/{total_chunks} ({synthesis_percent}%)"
+                            )
+                            synthesis_progress_bar.progress(max(0, min(100, synthesis_percent)))
                             overall_progress_text.write(
                                 f"总体进度：{overall_done}/{overall_total} ({max(0, min(100, overall_percent))}%)"
                             )

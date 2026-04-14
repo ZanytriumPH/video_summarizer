@@ -4,7 +4,9 @@ from typing import cast
 from core.workflow.video_summary.nodes.map_dispatcher import (
     map_dispatch_node,
     route_audio_send_tasks,
+    route_synthesis_send_tasks,
     route_vision_send_tasks,
+    synthesis_barrier_node,
 )
 from core.workflow.video_summary.state import VideoSummaryState
 
@@ -144,6 +146,66 @@ class TestMapDispatcherNode(unittest.TestCase):
         self.assertEqual(arg1.get("current_chunk", {}).get("chunk_id"), "chunk-001")
         self.assertEqual(arg1.get("keyframes_base_path"), "./frames")
         self.assertEqual(arg1.get("current_chunk_base_item", {}).get("vision_insights"), "old-v")
+
+    def test_synthesis_barrier_marks_ready_only_when_all_chunks_have_audio_and_vision(self):
+        state = cast(
+            VideoSummaryState,
+            {
+                "chunk_plan": [{"chunk_id": "c1"}, {"chunk_id": "c2"}],
+                "chunk_results": [
+                    {"chunk_id": "c1", "audio_insights": "a1", "vision_insights": "v1"},
+                    {"chunk_id": "c2", "audio_insights": "a2"},
+                ],
+                "reduce_debug_info": {},
+            },
+        )
+        result = synthesis_barrier_node(state)
+        debug_info = result.get("reduce_debug_info", {})
+        self.assertTrue(debug_info.get("synthesis_barrier_reached"))
+        self.assertEqual(debug_info.get("synthesis_ready_chunks"), 1)
+        self.assertEqual(debug_info.get("synthesis_total_chunks"), 2)
+        self.assertFalse(debug_info.get("synthesis_ready"))
+
+    def test_route_synthesis_send_tasks_waits_until_all_chunks_ready(self):
+        state = cast(
+            VideoSummaryState,
+            {
+                "concurrency_mode": "send_api",
+                "chunk_plan": [{"chunk_id": "c1"}, {"chunk_id": "c2"}],
+                "user_prompt": "focus",
+                "chunk_results": [
+                    {"chunk_id": "c1", "audio_insights": "a1", "vision_insights": "v1"},
+                    {"chunk_id": "c2", "audio_insights": "a2"},
+                ],
+            },
+        )
+        sends = route_synthesis_send_tasks(state)
+        self.assertEqual(sends, [])
+
+    def test_route_synthesis_send_tasks_builds_payload_when_all_chunks_ready(self):
+        state = cast(
+            VideoSummaryState,
+            {
+                "concurrency_mode": "send_api",
+                "chunk_plan": [{"chunk_id": "c1"}, {"chunk_id": "c2"}],
+                "user_prompt": "focus",
+                "chunk_results": [
+                    {"chunk_id": "c1", "audio_insights": "a1", "vision_insights": "v1"},
+                    {
+                        "chunk_id": "c2",
+                        "audio_insights": "a2",
+                        "vision_insights": "v2",
+                        "chunk_summary": "already_done",
+                    },
+                ],
+            },
+        )
+        sends = route_synthesis_send_tasks(state)
+        self.assertEqual(len(sends), 1)
+        self.assertEqual(getattr(sends[0], "node", ""), "chunk_synthesizer_worker_node")
+        arg0 = getattr(sends[0], "arg", {})
+        self.assertEqual(arg0.get("current_synthesis_chunk", {}).get("chunk_id"), "c1")
+        self.assertEqual(arg0.get("current_synthesis_base_item", {}).get("chunk_id"), "c1")
 
 
 if __name__ == "__main__":

@@ -78,6 +78,30 @@ def _process_single_chunk_synthesis(
 
 
 def chunk_synthesizer_node(state: VideoSummaryState) -> dict:
+    concurrency_mode = str(state.get("concurrency_mode", "threadpool")).strip().lower()
+    if concurrency_mode == "send_api":
+        # send_api 路径下，分片融合由 chunk_synthesizer_worker_node 完成。
+        # 这里仅做顺序重建与透传，避免重复线程池计算。
+        chunk_plan = state.get("chunk_plan", [])
+        chunk_results = state.get("chunk_results", [])
+        if not isinstance(chunk_plan, list) or not isinstance(chunk_results, list):
+            return {"chunk_results": chunk_results if isinstance(chunk_results, list) else []}
+
+        result_map: Dict[str, Dict[str, Any]] = {
+            str(item.get("chunk_id", "")).strip(): dict(item)
+            for item in chunk_results
+            if isinstance(item, dict) and str(item.get("chunk_id", "")).strip()
+        }
+
+        ordered_results: List[Dict[str, Any]] = []
+        for chunk in chunk_plan:
+            if not isinstance(chunk, dict):
+                continue
+            chunk_id = str(chunk.get("chunk_id", "")).strip()
+            if chunk_id and chunk_id in result_map:
+                ordered_results.append(result_map[chunk_id])
+        return {"chunk_results": ordered_results}
+
     chunk_plan = state.get("chunk_plan", [])
     chunk_results = state.get("chunk_results", [])
     user_prompt = state.get("user_prompt", "")
@@ -127,3 +151,29 @@ def chunk_synthesizer_node(state: VideoSummaryState) -> dict:
             ordered_results.append(result_map[chunk_id])
 
     return {"chunk_results": ordered_results}
+
+
+def chunk_synthesizer_worker_node(state: VideoSummaryState) -> dict:
+    """
+    Send API 路径下的单分片融合 worker。
+    每次仅处理一个 current_synthesis_chunk。
+    """
+    current_chunk = state.get("current_synthesis_chunk", {})
+    if not isinstance(current_chunk, dict):
+        return {"chunk_results": []}
+
+    chunk_id = str(current_chunk.get("chunk_id", "")).strip()
+    if not chunk_id:
+        return {"chunk_results": []}
+
+    user_prompt = str(state.get("user_prompt", ""))
+    base_item = state.get("current_synthesis_base_item", {"chunk_id": chunk_id})
+    if not isinstance(base_item, dict):
+        base_item = {"chunk_id": chunk_id}
+
+    _, merged = _process_single_chunk_synthesis(
+        chunk_id,
+        user_prompt,
+        base_item,
+    )
+    return {"chunk_results": [merged]}

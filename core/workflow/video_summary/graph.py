@@ -4,12 +4,14 @@ from core.workflow.video_summary.state import VideoSummaryState
 from core.workflow.video_summary.planner.chunk_planner import chunk_planner_node
 from core.workflow.video_summary.nodes.map_dispatcher import (
     map_dispatch_node,
+    synthesis_barrier_node,
     route_audio_send_tasks,
+    route_synthesis_send_tasks,
     route_vision_send_tasks,
 )
 from core.workflow.video_summary.nodes.chunk_audio_analyzer import chunk_audio_analyzer_node, chunk_audio_worker_node
 from core.workflow.video_summary.nodes.chunk_vision_analyzer import chunk_vision_analyzer_node, chunk_vision_worker_node
-from core.workflow.video_summary.nodes.chunk_synthesizer import chunk_synthesizer_node
+from core.workflow.video_summary.nodes.chunk_synthesizer import chunk_synthesizer_node, chunk_synthesizer_worker_node
 from core.workflow.video_summary.nodes.text_analyzer import text_analyzer_node
 from core.workflow.video_summary.nodes.vision_analyzer import vision_analyzer_node
 from core.workflow.video_summary.nodes.fusion_drafter import fusion_drafter_node
@@ -56,8 +58,12 @@ def _add_chunk_pipeline_for_send_api_scaffold(workflow: StateGraph) -> None:
     workflow.add_conditional_edges("map_dispatch_node", route_audio_send_tasks)
     workflow.add_conditional_edges("map_dispatch_node", route_vision_send_tasks)
 
-    workflow.add_edge("chunk_audio_worker_node", "chunk_synthesizer_node")
-    workflow.add_edge("chunk_vision_worker_node", "chunk_synthesizer_node")
+    # 方案 A：先汇聚到 barrier，再触发二阶段 synthesis fan-out。
+    workflow.add_edge("chunk_audio_worker_node", "synthesis_barrier_node")
+    workflow.add_edge("chunk_vision_worker_node", "synthesis_barrier_node")
+    workflow.add_conditional_edges("synthesis_barrier_node", route_synthesis_send_tasks)
+
+    workflow.add_edge("chunk_synthesizer_worker_node", "chunk_synthesizer_node")
 
 
 def build_video_summary_graph(checkpointer: Any = None, concurrency_mode: str = CONCURRENCY_MODE_THREADPOOL) -> Any:
@@ -72,10 +78,12 @@ def build_video_summary_graph(checkpointer: Any = None, concurrency_mode: str = 
     # 使用 type: ignore 来抑制因 LangGraph 底层复杂泛型而产生的静态推断警告
     workflow.add_node("chunk_planner_node", chunk_planner_node) # type: ignore
     workflow.add_node("map_dispatch_node", map_dispatch_node) # type: ignore
+    workflow.add_node("synthesis_barrier_node", synthesis_barrier_node) # type: ignore
     workflow.add_node("chunk_audio_node", chunk_audio_analyzer_node) # type: ignore
     workflow.add_node("chunk_audio_worker_node", chunk_audio_worker_node) # type: ignore
     workflow.add_node("chunk_vision_node", chunk_vision_analyzer_node) # type: ignore
     workflow.add_node("chunk_vision_worker_node", chunk_vision_worker_node) # type: ignore
+    workflow.add_node("chunk_synthesizer_worker_node", chunk_synthesizer_worker_node) # type: ignore
     workflow.add_node("chunk_synthesizer_node", chunk_synthesizer_node) # type: ignore
     workflow.add_node("text_analyzer_node", text_analyzer_node) # type: ignore
     workflow.add_node("vision_analyzer_node", vision_analyzer_node) # type: ignore

@@ -2,7 +2,7 @@ import unittest
 from typing import cast
 from unittest.mock import MagicMock, patch
 
-from core.workflow.video_summary.nodes.chunk_synthesizer import chunk_synthesizer_node
+from core.workflow.video_summary.nodes.chunk_synthesizer import chunk_synthesizer_node, chunk_synthesizer_worker_node
 from core.workflow.video_summary.state import VideoSummaryState
 
 
@@ -138,6 +138,41 @@ class TestChunkSynthesizerNode(unittest.TestCase):
         self.assertEqual(len(submitted_futures), 4)
         mock_as_completed.assert_called_once()
         self.assertEqual(mock_process.call_count, 4)
+
+    @patch("core.workflow.video_summary.nodes.chunk_synthesizer._process_single_chunk_synthesis")
+    def test_chunk_synthesizer_worker_node_handles_single_chunk(self, mock_process):
+        mock_process.return_value = (
+            "chunk-009",
+            {
+                "chunk_id": "chunk-009",
+                "chunk_summary": "synth-summary",
+                "latency_ms": {"synthesizer": 10},
+            },
+        )
+
+        state = cast(
+            VideoSummaryState,
+            {
+                "current_synthesis_chunk": {"chunk_id": "chunk-009"},
+                "current_synthesis_base_item": {
+                    "chunk_id": "chunk-009",
+                    "audio_insights": "a",
+                    "vision_insights": "v",
+                },
+                "user_prompt": "focus",
+            },
+        )
+
+        result = chunk_synthesizer_worker_node(state)
+        self.assertIn("chunk_results", result)
+        self.assertEqual(len(result["chunk_results"]), 1)
+        self.assertEqual(result["chunk_results"][0]["chunk_summary"], "synth-summary")
+        mock_process.assert_called_once()
+
+    def test_chunk_synthesizer_worker_node_returns_empty_when_chunk_missing(self):
+        state = cast(VideoSummaryState, {"current_synthesis_chunk": {}})
+        result = chunk_synthesizer_worker_node(state)
+        self.assertEqual(result["chunk_results"], [])
 
 
 if __name__ == "__main__":

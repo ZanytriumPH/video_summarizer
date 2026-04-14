@@ -104,6 +104,8 @@ class VideoSummaryState(TypedDict):
     chunk_results: Annotated[List[Dict], _merge_chunk_results]  # 带 reducer 的分片结果，支持并行分支合并
     current_chunk: Dict             # 当前分片上下文（为 Send API 预留）
     current_chunk_base_item: Dict   # 当前分片已有结果（Send API worker 合并基座）
+    current_synthesis_chunk: Dict   # 当前融合分片上下文（Send API synthesizer worker）
+    current_synthesis_base_item: Dict  # 当前融合分片已有结果（含音视频洞察）
     chunk_audio_insights: Dict      # 分片音频洞察映射（可选中间态）
     chunk_visual_insights: Dict     # 分片视觉洞察映射（可选中间态）
     chunk_retry_count: Dict         # 分片重试计数
