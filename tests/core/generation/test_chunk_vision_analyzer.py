@@ -1,4 +1,6 @@
 import unittest
+import base64
+from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock, patch
 
@@ -169,6 +171,94 @@ class TestChunkVisionAnalyzerNode(unittest.TestCase):
         self.assertEqual(len(submitted_futures), 4)
         mock_as_completed.assert_called_once()
         self.assertEqual(mock_process.call_count, 4)
+
+    @patch.dict("core.workflow.video_summary.nodes.chunk_vision_analyzer._VISION_SEARCH_CACHE", {}, clear=True)
+    @patch("core.workflow.video_summary.nodes.chunk_vision_analyzer.execute_tavily_search")
+    @patch("core.workflow.video_summary.nodes.chunk_vision_analyzer.OpenAI")
+    def test_supports_frame_file_and_mixed_sources(self, mock_openai, mock_search):
+        """新增：支持 frame_file、inline image 混合来源，且优先 inline image。"""
+        temp_dir = Path("./test_temp_frames_chunk")
+        temp_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            file_frame = temp_dir / "f1.jpg"
+            file_frame.write_bytes(b"chunk_frame_file")
+            file_b64 = base64.b64encode(b"chunk_frame_file").decode("utf-8")
+
+            fallback_frame = temp_dir / "f2.jpg"
+            fallback_frame.write_bytes(b"fallback_frame")
+            fallback_b64 = base64.b64encode(b"fallback_frame").decode("utf-8")
+
+            mock_search.return_value = "vision-search-ok"
+
+            mock_client = MagicMock()
+            mock_response = MagicMock()
+            mock_response.choices = [MagicMock(message=MagicMock(content="vision-ok"))]
+            mock_client.chat.completions.create.return_value = mock_response
+            mock_openai.return_value = mock_client
+
+            state = cast(
+                VideoSummaryState,
+                {
+                    "chunk_plan": [{"chunk_id": "chunk-000", "keyframe_indexes": [0, 1, 2]}],
+                    "keyframes_base_path": str(temp_dir),
+                    "keyframes": [
+                        {"time": "00:01", "frame_file": "f1.jpg"},
+                        {"time": "00:02", "image": "inline_preferred", "frame_file": "f2.jpg"},
+                        {"time": "00:03", "frame_file": "missing.jpg"},
+                    ],
+                    "chunk_results": [{"chunk_id": "chunk-000"}],
+                    "user_prompt": "关注界面变化",
+                },
+            )
+
+            with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}, clear=True):
+                with patch("core.workflow.video_summary.nodes.chunk_vision_analyzer.CHUNK_MAX_TOOL_CALLS", 2):
+                    result = chunk_vision_analyzer_node(state)
+
+            self.assertEqual(len(result["chunk_results"]), 1)
+            self.assertEqual(result["chunk_results"][0]["vision_insights"], "vision-ok")
+
+            call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+            messages = call_kwargs.get("messages", [])
+            user_payload = [msg["content"] for msg in messages if msg["role"] == "user"][0]
+            image_items = [item for item in user_payload if item.get("type") == "image_url"]
+
+            # f1.jpg 命中 + inline image 命中；missing.jpg 不会生成 image_url
+            self.assertEqual(len(image_items), 2)
+            urls = [item["image_url"]["url"] for item in image_items]
+            self.assertTrue(any(file_b64 in u for u in urls))
+            self.assertTrue(any("inline_preferred" in u for u in urls))
+            self.assertFalse(any(fallback_b64 in u for u in urls))
+        finally:
+            if temp_dir.exists():
+                for child in temp_dir.iterdir():
+                    child.unlink()
+                temp_dir.rmdir()
+
+    @patch.dict("core.workflow.video_summary.nodes.chunk_vision_analyzer._VISION_SEARCH_CACHE", {}, clear=True)
+    @patch("core.workflow.video_summary.nodes.chunk_vision_analyzer.execute_tavily_search")
+    def test_missing_frame_file_still_returns_chunk_result(self, mock_search):
+        """新增：frame_file 缺失时不应中断，仍应返回 chunk 结果。"""
+        mock_search.return_value = "vision-search-ok"
+
+        state = cast(
+            VideoSummaryState,
+            {
+                "chunk_plan": [{"chunk_id": "chunk-000", "keyframe_indexes": [0]}],
+                "keyframes_base_path": "./not_exists",
+                "keyframes": [{"time": "00:01", "frame_file": "missing.jpg"}],
+                "chunk_results": [{"chunk_id": "chunk-000"}],
+                "user_prompt": "关注界面变化",
+            },
+        )
+
+        with patch.dict("os.environ", {}, clear=True):
+            result = chunk_vision_analyzer_node(state)
+
+        self.assertEqual(len(result["chunk_results"]), 1)
+        self.assertIn("视觉摘要（降级）", result["chunk_results"][0]["vision_insights"])
+        self.assertEqual(result["chunk_results"][0]["evidence_refs"]["keyframe_indexes"], [0])
 
 
 if __name__ == "__main__":

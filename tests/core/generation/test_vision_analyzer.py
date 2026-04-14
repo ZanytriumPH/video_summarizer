@@ -2,6 +2,8 @@ import unittest
 from unittest.mock import patch, MagicMock
 import os
 import sys
+import base64
+from pathlib import Path
 from pathlib import Path
 
 # 将项目根目录添加到 sys.path
@@ -164,6 +166,127 @@ class TestVisionAnalyzerNode(unittest.TestCase):
         # 断言错误信息被正确捕获并返回
         self.assertIn("[系统自动提示]：视觉分析提取失败", result["visual_insights"])
         self.assertIn("Payload Too Large", result["visual_insights"])
+
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "fake_vision_key", "OPENAI_BASE_URL": "https://fake.url"})
+    @patch('core.workflow.video_summary.nodes.vision_analyzer.OpenAI')
+    def test_frame_file_is_resolved_via_keyframes_base_path(self, mock_openai_class):
+        """新增：仅有 frame_file 时，应能通过 keyframes_base_path 解析并注入多模态请求。"""
+        temp_dir = Path("./test_temp_frames_vision")
+        temp_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            img_path = temp_dir / "k1.jpg"
+            raw = b"frame_from_file"
+            img_path.write_bytes(raw)
+            expected_b64 = base64.b64encode(raw).decode("utf-8")
+
+            state = {
+                "keyframes": [
+                    {"time": "00:10", "frame_file": "k1.jpg"},
+                ],
+                "keyframes_base_path": str(temp_dir),
+                "user_prompt": "关注画面变化",
+            }
+
+            mock_client = MagicMock()
+            mock_openai_class.return_value = mock_client
+            mock_response = MagicMock()
+            mock_response.choices[0].message.tool_calls = None
+            mock_response.choices[0].message.content = "ok"
+            mock_client.chat.completions.create.return_value = mock_response
+
+            result = vision_analyzer_node(state)
+            self.assertEqual(result["visual_insights"], "ok")
+
+            call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+            messages = call_kwargs.get("messages", [])
+            user_content = [msg["content"] for msg in messages if msg["role"] == "user"][0]
+            image_items = [item for item in user_content if item.get("type") == "image_url"]
+
+            self.assertEqual(len(image_items), 1)
+            self.assertIn(expected_b64, image_items[0]["image_url"]["url"])
+        finally:
+            if temp_dir.exists():
+                for child in temp_dir.iterdir():
+                    child.unlink()
+                temp_dir.rmdir()
+
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "fake_vision_key", "OPENAI_BASE_URL": "https://fake.url"})
+    @patch('core.workflow.video_summary.nodes.vision_analyzer.OpenAI')
+    def test_inline_image_has_priority_over_frame_file(self, mock_openai_class):
+        """新增：image 与 frame_file 同时存在时，应优先使用 image。"""
+        temp_dir = Path("./test_temp_frames_vision_priority")
+        temp_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            img_path = temp_dir / "k2.jpg"
+            img_path.write_bytes(b"fallback_file")
+
+            state = {
+                "keyframes": [
+                    {
+                        "time": "00:15",
+                        "image": "inline_preferred_b64",
+                        "frame_file": "k2.jpg",
+                    },
+                ],
+                "keyframes_base_path": str(temp_dir),
+                "user_prompt": "关注画面变化",
+            }
+
+            mock_client = MagicMock()
+            mock_openai_class.return_value = mock_client
+            mock_response = MagicMock()
+            mock_response.choices[0].message.tool_calls = None
+            mock_response.choices[0].message.content = "ok"
+            mock_client.chat.completions.create.return_value = mock_response
+
+            result = vision_analyzer_node(state)
+            self.assertEqual(result["visual_insights"], "ok")
+
+            call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+            messages = call_kwargs.get("messages", [])
+            user_content = [msg["content"] for msg in messages if msg["role"] == "user"][0]
+            image_items = [item for item in user_content if item.get("type") == "image_url"]
+
+            self.assertEqual(len(image_items), 1)
+            self.assertIn("inline_preferred_b64", image_items[0]["image_url"]["url"])
+            self.assertNotIn(base64.b64encode(b"fallback_file").decode("utf-8"), image_items[0]["image_url"]["url"])
+        finally:
+            if temp_dir.exists():
+                for child in temp_dir.iterdir():
+                    child.unlink()
+                temp_dir.rmdir()
+
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "fake_vision_key", "OPENAI_BASE_URL": "https://fake.url"})
+    @patch('core.workflow.video_summary.nodes.vision_analyzer.OpenAI')
+    def test_missing_frame_file_is_skipped_without_crash(self, mock_openai_class):
+        """新增：frame_file 丢失时应跳过该帧，不应崩溃。"""
+        state = {
+            "keyframes": [
+                {"time": "00:01", "frame_file": "not_exists.jpg"},
+                {"time": "00:02", "image": "valid_inline"},
+            ],
+            "keyframes_base_path": "./path_not_exist",
+            "user_prompt": "关注画面变化",
+        }
+
+        mock_client = MagicMock()
+        mock_openai_class.return_value = mock_client
+        mock_response = MagicMock()
+        mock_response.choices[0].message.tool_calls = None
+        mock_response.choices[0].message.content = "ok"
+        mock_client.chat.completions.create.return_value = mock_response
+
+        result = vision_analyzer_node(state)
+        self.assertEqual(result["visual_insights"], "ok")
+
+        call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+        messages = call_kwargs.get("messages", [])
+        user_content = [msg["content"] for msg in messages if msg["role"] == "user"][0]
+        image_items = [item for item in user_content if item.get("type") == "image_url"]
+        self.assertEqual(len(image_items), 1)
+        self.assertIn("valid_inline", image_items[0]["image_url"]["url"])
 
 if __name__ == '__main__':
     unittest.main()
