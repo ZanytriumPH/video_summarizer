@@ -1,7 +1,11 @@
 import unittest
 from typing import cast
 
-from core.workflow.video_summary.nodes.map_dispatcher import map_dispatch_node, route_audio_send_tasks
+from core.workflow.video_summary.nodes.map_dispatcher import (
+    map_dispatch_node,
+    route_audio_send_tasks,
+    route_vision_send_tasks,
+)
 from core.workflow.video_summary.state import VideoSummaryState
 
 
@@ -43,7 +47,7 @@ class TestMapDispatcherNode(unittest.TestCase):
             },
         )
         result = map_dispatch_node(state)
-        self.assertEqual(result["reduce_debug_info"]["dispatch_strategy"], "send-api-audio-pilot")
+        self.assertEqual(result["reduce_debug_info"]["dispatch_strategy"], "send-api-dual-pilot")
 
     def test_map_dispatch_handles_invalid_types(self):
         state = cast(
@@ -100,6 +104,46 @@ class TestMapDispatcherNode(unittest.TestCase):
         self.assertEqual(arg0.get("current_chunk", {}).get("chunk_id"), "chunk-000")
         self.assertEqual(arg0.get("user_prompt"), "focus")
         self.assertEqual(arg0.get("current_chunk_base_item", {}).get("audio_insights"), "old")
+
+    def test_route_vision_send_tasks_only_for_send_api(self):
+        state = cast(
+            VideoSummaryState,
+            {
+                "concurrency_mode": "threadpool",
+                "chunk_plan": [{"chunk_id": "chunk-000", "keyframe_indexes": [0]}],
+                "keyframes": [{"time": "00:01", "image": "x"}],
+                "keyframes_base_path": "./frames",
+                "user_prompt": "p",
+                "chunk_results": [],
+            },
+        )
+        sends = route_vision_send_tasks(state)
+        self.assertEqual(sends, [])
+
+    def test_route_vision_send_tasks_builds_send_payload(self):
+        state = cast(
+            VideoSummaryState,
+            {
+                "concurrency_mode": "send_api",
+                "chunk_plan": [
+                    {"chunk_id": "chunk-000", "keyframe_indexes": [0]},
+                    {"chunk_id": "chunk-001", "keyframe_indexes": [1]},
+                ],
+                "keyframes": [{"time": "00:01", "image": "x"}, {"time": "00:02", "image": "y"}],
+                "keyframes_base_path": "./frames",
+                "user_prompt": "focus",
+                "chunk_results": [{"chunk_id": "chunk-001", "vision_insights": "old-v"}],
+            },
+        )
+        sends = route_vision_send_tasks(state)
+        self.assertEqual(len(sends), 2)
+        self.assertEqual(getattr(sends[0], "node", ""), "chunk_vision_worker_node")
+        self.assertEqual(getattr(sends[1], "node", ""), "chunk_vision_worker_node")
+
+        arg1 = getattr(sends[1], "arg", {})
+        self.assertEqual(arg1.get("current_chunk", {}).get("chunk_id"), "chunk-001")
+        self.assertEqual(arg1.get("keyframes_base_path"), "./frames")
+        self.assertEqual(arg1.get("current_chunk_base_item", {}).get("vision_insights"), "old-v")
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock, patch
 
-from core.workflow.video_summary.nodes.chunk_vision_analyzer import chunk_vision_analyzer_node
+from core.workflow.video_summary.nodes.chunk_vision_analyzer import chunk_vision_analyzer_node, chunk_vision_worker_node
 from core.workflow.video_summary.state import VideoSummaryState
 
 
@@ -259,6 +259,37 @@ class TestChunkVisionAnalyzerNode(unittest.TestCase):
         self.assertEqual(len(result["chunk_results"]), 1)
         self.assertIn("视觉摘要（降级）", result["chunk_results"][0]["vision_insights"])
         self.assertEqual(result["chunk_results"][0]["evidence_refs"]["keyframe_indexes"], [0])
+
+    @patch("core.workflow.video_summary.nodes.chunk_vision_analyzer._process_single_chunk_vision")
+    def test_chunk_vision_worker_processes_single_chunk(self, mock_process):
+        mock_process.return_value = (
+            "chunk-000",
+            {
+                "chunk_id": "chunk-000",
+                "vision_insights": "worker-vision",
+                "evidence_refs": {"keyframe_indexes": [0]},
+            },
+        )
+
+        state = cast(
+            VideoSummaryState,
+            {
+                "keyframes": [{"time": "00:01", "image": "x"}],
+                "keyframes_base_path": "./frames",
+                "user_prompt": "focus",
+                "current_chunk": {"chunk_id": "chunk-000", "keyframe_indexes": [0]},
+                "current_chunk_base_item": {"chunk_id": "chunk-000"},
+            },
+        )
+
+        result = chunk_vision_worker_node(state)
+        self.assertEqual(result["chunk_results"][0]["vision_insights"], "worker-vision")
+        mock_process.assert_called_once()
+
+    def test_chunk_vision_worker_handles_invalid_current_chunk(self):
+        state = cast(VideoSummaryState, {"current_chunk": "bad"})
+        result = chunk_vision_worker_node(state)
+        self.assertEqual(result["chunk_results"], [])
 
 
 if __name__ == "__main__":

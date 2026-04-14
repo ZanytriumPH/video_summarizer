@@ -199,3 +199,41 @@ def chunk_vision_analyzer_node(state: VideoSummaryState) -> dict:
             ordered_results.append(result_map[chunk_id])
 
     return {"chunk_results": ordered_results}
+
+
+def chunk_vision_worker_node(state: VideoSummaryState) -> dict:
+    """
+    Send API 试点 worker：每次仅处理一个 current_chunk。
+    """
+    current_chunk = state.get("current_chunk", {})
+    if not isinstance(current_chunk, dict):
+        return {"chunk_results": []}
+
+    chunk_id = str(current_chunk.get("chunk_id", "")).strip()
+    if not chunk_id:
+        return {"chunk_results": []}
+
+    frame_indexes = current_chunk.get("keyframe_indexes", [])
+    if not isinstance(frame_indexes, list):
+        frame_indexes = []
+
+    keyframes = state.get("keyframes", [])
+    if not isinstance(keyframes, list):
+        keyframes = []
+    keyframes_base_path = str(state.get("keyframes_base_path", ""))
+    user_prompt = str(state.get("user_prompt", ""))
+
+    base_item = state.get("current_chunk_base_item", {"chunk_id": chunk_id})
+    if not isinstance(base_item, dict):
+        base_item = {"chunk_id": chunk_id}
+
+    _, merged = _process_single_chunk_vision(
+        chunk_id,
+        frame_indexes,
+        keyframes,
+        keyframes_base_path,
+        user_prompt,
+        base_item,
+    )
+
+    return {"chunk_results": [merged]}
