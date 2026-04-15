@@ -52,7 +52,7 @@ def main():
         base_url = st.text_input("OpenAI Base URL", value=default_base_url, help="如果您使用的是兼容 OpenAI 格式的中转 API，请在此修改地址。")
         
         # 选择视频来源
-        source_type = st.radio("🎬 Video Source (视频来源)", ("YouTube URL", "Local Upload")
+        source_type = st.radio("🎬 Video Source (视频来源)", ("YouTube URL", "Local Upload"))
         
         video_url = None
         uploaded_file = None
@@ -99,7 +99,7 @@ def main():
             st.session_state["active_thread_id"] = restored_thread_id.strip()
             st.success("当前会话 thread_id 已更新。")
 
-        process_button = st.button("🚀 Generate Review Draft (生成待审批稿)"
+        process_button = st.button("🚀 Generate Review Draft (生成待审批稿)")
 
     # Main content area
     col1, col2 = st.columns(2)
@@ -118,7 +118,7 @@ def main():
 
     # 右侧显示摘要
     with col2:
-        st.header("📝 Summary"
+        st.header("📝 Summary")
 
         active_thread_id = st.session_state.get("active_thread_id", "")
         if active_thread_id:
@@ -135,8 +135,7 @@ def main():
                 review_package = {}
                 
                 # [状态回传体验跃升] 使用 st.status 作为后台运行日志的容器
-                with st.status("🔄 正在唤醒深度多模态解析引擎，请坐和放宽...", expanded=True) as status_container
-:
+                with st.status("🔄 正在唤醒深度多模态解析引擎，请坐和放宽...", expanded=True) as status_container:
                     progress_header = st.empty()
                     audio_progress_text = st.empty()
                     audio_progress_bar = st.progress(0)
@@ -285,8 +284,8 @@ def main():
                 if not thread_id_for_finalize:
                     st.warning("缺少 thread_id，请先执行第一阶段。")
                 else:
-                    with st.status("🔄 正在执行第二阶段：人类审批后全篇总结与质量审查...", expanded=True) as finalize_status
-:
+                    with st.status("🔄 正在执行第二阶段：人类审批后全篇总结与质量审查...", expanded=True) as finalize_status:
+
                         def update_finalize_status(msg: str):
                             finalize_status.update(label=msg)
                             st.write(msg)
@@ -350,8 +349,7 @@ def main():
             elif not time_travel_question.strip():
                 st.warning("请输入追问问题。")
             else:
-                with st.status("🕒 正在回溯历史状态并抽取目标时间窗证据...", expanded=True) as travel_status
-:
+                with st.status("🕒 正在回溯历史状态并抽取目标时间窗证据...", expanded=True) as travel_status:
                     def update_time_travel_status(msg: str):
                         travel_status.update(label=msg)
                         st.write(msg)

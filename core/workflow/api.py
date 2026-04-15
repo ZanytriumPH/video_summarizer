@@ -98,11 +98,6 @@ def analyze_video(
         "concurrency_mode": resolved_mode,
         "user_prompt": user_prompt,
         "aggregated_chunk_insights": "",
-        "draft_summary": "",
-        "hallucination_score": "",
-        "usefulness_score": "",
-        "feedback_instructions": "",
-        "revision_count": 0,
         "human_edited_aggregated_insights": "",
         "human_guidance": "",
         "human_gate_status": "pending",
@@ -124,9 +119,6 @@ def analyze_video(
         "chunk_synthesizer_node": "⚡ [Chunk Synthesizer] 并行汇聚：将分片级音视频洞察实时融合为中间层 chunk_summary...",
         "chunk_aggregator_node": "🧾 [Chunk Aggregator] 正在按时间线整合 n 个分片洞察，生成统一证据底稿...",
         "human_gate_node": "🧑‍⚖️ [Human Gate] 已到达人类审批关口，请确认或编辑聚合稿后继续。",
-        "fusion_drafter_node": "🧩 [Synthesizer Agent] 正在基于聚合证据底稿，起草最终报告...",
-        "hallucination_grader_node": "⚖️ [Hallucination Guard] 启动 SSCD 时空对抗防御网，正在对草稿中的每一个数据源进行反向核查...",
-        "usefulness_grader_node": "🎯 [Usefulness Guard] 正在从挑剔的 C-level 视角评估当前的总结草稿是否真正命中了您的原始痛点诉求...",
     }
 
     def _emit_chunk_progress(
