@@ -95,27 +95,27 @@ class VideoSummaryState(TypedDict):
     user_prompt: str                # 用户具体的总结侧重点
     
     # 中间态数据
-    aggregated_chunk_insights: str  # 聚合后的分片洞察（供最终 drafter 输入）
+    aggregated_chunk_insights: str  # 写入: chunk_aggregator_node；消费: fusion_drafter_node / hallucination_grader_node
 
     # 分片执行中间态
-    video_duration_seconds: int     # 推断出的视频总时长（秒）
-    chunk_plan: List[Dict]          # 分片计划
-    chunk_results: Annotated[List[Dict], _merge_chunk_results]  # 带 reducer 的分片结果，支持并行分支合并
-    current_chunk: Dict             # Send API worker 当前处理的分片上下文
-    current_chunk_base_item: Dict   # 当前分片已有结果，用于 worker 合并
-    current_synthesis_chunk: Dict   # Send API synthesis worker 当前处理的分片上下文
-    current_synthesis_base_item: Dict  # 当前分片已有的音视频洞察
-    chunk_audio_insights: Dict      # 分片音频洞察映射（可选中间态）
-    chunk_visual_insights: Dict     # 分片视觉洞察映射（可选中间态）
-    chunk_retry_count: Dict         # 分片重试计数
-    reduce_debug_info: Dict         # 分发与汇聚阶段的调试元信息
+    video_duration_seconds: int     # 写入: chunk_planner_node；消费: 主要用于观测和测试，当前主链路不直接依赖
+    chunk_plan: List[Dict]          # 写入: chunk_planner_node；消费: map_dispatch_node / chunk_audio_analyzer_node / chunk_vision_analyzer_node / chunk_synthesizer_node / chunk_aggregator_node / Send API 路由函数
+    chunk_results: Annotated[List[Dict], _merge_chunk_results]  # 写入: audio/vision/synthesizer 各节点与对应 worker；消费: synthesis_barrier_node / chunk_synthesizer_node / chunk_aggregator_node / 进度上报逻辑
+    current_chunk: Dict             # 写入: route_audio_send_tasks / route_vision_send_tasks；消费: chunk_audio_worker_node / chunk_vision_worker_node
+    current_chunk_base_item: Dict   # 写入: route_audio_send_tasks / route_vision_send_tasks；消费: chunk_audio_worker_node / chunk_vision_worker_node
+    current_synthesis_chunk: Dict   # 写入: route_synthesis_send_tasks；消费: chunk_synthesizer_worker_node
+    current_synthesis_base_item: Dict  # 写入: route_synthesis_send_tasks；消费: chunk_synthesizer_worker_node
+    chunk_audio_insights: Dict      # 预留字段；当前主链路未稳定写入，未来可用于按 chunk_id 建立音频侧映射缓存
+    chunk_visual_insights: Dict     # 预留字段；当前主链路未稳定写入，未来可用于按 chunk_id 建立视觉侧映射缓存
+    chunk_retry_count: Dict         # 写入: map_dispatch_node；消费: 当前主链路主要用于状态透传和未来重试策略扩展
+    reduce_debug_info: Dict         # 写入: map_dispatch_node / synthesis_barrier_node / chunk_aggregator_node；消费: 前端调试展示、测试断言、运行诊断
     
     # 输出与循环控制
-    draft_summary: str              # 当前生成的融合总结草稿
+    draft_summary: str              # 写入: fusion_drafter_node；消费: hallucination_grader_node / usefulness_grader_node / summarize_video() 最终返回
     
     # 质量审查与重写控制
-    hallucination_score: str        # 幻觉审查结果："yes" 表示存在幻觉，"no" 表示通过
-    usefulness_score: str           # 有用性审查结果："yes" 表示满足需求，"no" 表示需要重写
-    feedback_instructions: str      # 审查节点给成文节点的定向修改指令
+    hallucination_score: str        # 写入: hallucination_grader_node；消费: route_after_hallucination / 前端告警文案
+    usefulness_score: str           # 写入: usefulness_grader_node；消费: route_after_usefulness / 前端告警文案
+    feedback_instructions: str      # 写入: hallucination_grader_node / usefulness_grader_node；消费: fusion_drafter_node
 
-    revision_count: int             # 重写次数
+    revision_count: int             # 写入: fusion_drafter_node；消费: hallucination_grader_node / usefulness_grader_node / 前端状态文案
