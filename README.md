@@ -7,9 +7,11 @@
 ## 项目亮点
 
 - 多模态总结：同时利用 Whisper 转录文本与视频关键帧进行联合理解。
-- LangGraph 工作流：文本分析、视觉分析、融合起草、幻觉审查、有用性审查形成闭环流转。
+- 两阶段工作流：第一阶段完成分片分析与聚合并进入人类审批，第二阶段才进行最终成文与质量审查。
+- LangGraph 工作流：基于分片规划与 Map-Reduce 编排，支持 `threadpool` 与 `send_api` 并发模式。
 - Self-RAG 双重防线：先做事实核查，再做用户需求对齐，避免“有文笔但不靠谱”的输出。
 - 主动求知工具：当文本或画面出现生僻热词、梗图、未知 UI 或角色时，分析节点可调用 Tavily 搜索补充背景知识。
+- 人类在环（HITL）：支持对聚合稿进行人工编辑和补充指导意见，再触发最终总结生成。
 - 会话持久化：通过 thread_id + checkpoint 机制保存同一视频分析会话状态。
 - 时间旅行追问：总结完成后，用户可以指定某个时间戳继续提问，系统会回溯该时间窗附近的关键帧和语音片段回答。
 - 前端会话恢复：Streamlit 页面支持绑定历史 thread_id，并继续对已有会话发起追问。
@@ -31,11 +33,20 @@
 
 ### 3. 工作流层
 
-- text_analyzer_node：提炼语音核心观点、章节、术语，并在必要时主动搜索
-- vision_analyzer_node：解析关键帧中的动作、界面、图表、文本，并在必要时主动搜索
-- fusion_drafter_node：图文对齐，生成结构化总结草稿
+- chunk_planner_node：按时间轴生成分片计划（chunk_plan）
+- map_dispatch_node：按并发模式分发音频/视觉分片任务
+- chunk_audio_* / chunk_vision_*：并行分析每个分片的语音与视觉证据
+- chunk_synthesizer_node：融合每个分片的音视频洞察
+- chunk_aggregator_node：汇总所有分片输出，生成聚合证据底稿
+- human_gate_node：强制进入人类审批关口（第一阶段结束）
+- fusion_drafter_node：基于审批后的聚合稿生成全篇总结
 - hallucination_grader_node：检测脱离原始证据的幻觉内容
-- usefulness_grader_node：判断结果是否真正命中用户要求
+- usefulness_grader_node：判断结果是否真正命中用户要求（含 human_guidance）
+
+### 3.1 两阶段工作流
+
+- 阶段一 `analyze_*`：提取 + 分片分析 + 聚合 + 人审关口，返回 `review_package`
+- 阶段二 `finalize_summary`：读取同一 `thread_id` checkpoint，使用人工编辑/指导完成成文与质检闭环
 
 ### 4. 会话与时间旅行
 
@@ -59,12 +70,14 @@
 ```text
 视频输入（URL / Upload）
   -> 提取层（下载 / 保存 / 音频提取 / 关键帧提取 / Whisper 转录）
-  -> LangGraph 工作流
-      -> 文本分析节点
-      -> 视觉分析节点
-      -> 图文融合起草节点
-      -> 幻觉审查节点
-      -> 有用性审查节点
+  -> 第一阶段工作流（analyze_video）
+      -> chunk 规划 / 分发 / 并行分析 / 分片融合 / 聚合
+      -> human_gate_node（等待人工审批）
+  -> review_package（待审批包）
+  -> 第二阶段工作流（finalize_summary）
+      -> fusion_drafter
+      -> hallucination_grader
+      -> usefulness_grader（不通过则回流重写）
   -> 最终 Markdown 总结
 ```
 
@@ -243,8 +256,10 @@ http://localhost:8501
 1. 输入 OpenAI API Key 与 Base URL
 2. 选择视频来源：YouTube URL 或 Local Upload
 3. 输入总结偏好
-4. 点击 Generate Summary
-5. 查看生成结果与当前 thread_id
+4. 点击 Generate Review Draft（生成待审批稿）
+5. 在 Human Review 区编辑聚合稿，按需填写 human_guidance
+6. 点击 Approve And Generate Final Summary（审批并生成最终总结）
+7. 查看最终结果与当前 thread_id
 
 ### 2. 绑定历史会话
 
@@ -270,11 +285,18 @@ from services.workflow_service import VideoSummaryService
 service = VideoSummaryService(api_key="your-key", base_url="https://api.openai.com/v1")
 
 with open("sample.mp4", "rb") as video_file:
-    summary = service.process_uploaded_video(
+  review_package = service.analyze_uploaded_video(
         uploaded_file=video_file,
         original_filename="sample.mp4",
         user_prompt="请重点分析视频中的操作流程",
+    concurrency_mode="threadpool",  # 或 send_api
     )
+
+summary = service.finalize_summary(
+  thread_id=review_package["thread_id"],
+  edited_aggregated_chunk_insights=review_package.get("editable_aggregated_chunk_insights", ""),
+  human_guidance="重点补充架构设计权衡与风险点",
+)
 
 print(service.last_thread_id)
 print(summary)
@@ -302,7 +324,7 @@ print(answer)
 ### 快速运行核心测试
 
 ```bash
-python -m pytest tests/core/generation/test_time_travel.py tests/integration/test_time_travel_pipeline.py tests/integration/test_checkpoint_restore_flow.py tests/integration/test_workflow_service_session.py -q
+python -m pytest tests/integration/test_api_status_messages.py tests/integration/test_checkpoint_restore_flow.py tests/integration/test_human_review_finalize_flow.py tests/integration/test_workflow_service_session.py tests/core/generation/test_time_travel.py tests/integration/test_time_travel_pipeline.py -q
 ```
 
 ### 运行搜索工具测试
@@ -346,6 +368,7 @@ $env:RUN_E2E='true'; python -m pytest tests/integration/test_e2e_pipeline.py -q
 ## 当前测试覆盖重点
 
 - 搜索工具的成功、空结果、畸形响应、网络异常
+- 两阶段链路：第一阶段待审批包输出、第二阶段审批后 finalize
 - 时间戳解析与时间窗抽取
 - 时间旅行接口的正常路径与降级路径
 - checkpoint 持久化与同一 thread_id 最新状态覆盖
@@ -356,6 +379,7 @@ $env:RUN_E2E='true'; python -m pytest tests/integration/test_e2e_pipeline.py -q
 
 - 默认 checkpoint backend 为 memory，重启进程后 thread_id 状态会丢失
 - postgres 持久化已预留接口，但默认未安装对应依赖
+- 第一阶段结束后必须经过人工审批（HITL）才会生成最终总结
 - Time Travel 当前基于“最近关键帧 + 时间窗 transcript”做证据恢复，尚未实现 clip-level / frame-level 向量检索
 - 前端已支持会话恢复与追问，但尚未实现“历史会话列表管理”
 
