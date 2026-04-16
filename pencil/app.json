@@ -1,0 +1,57 @@
+{
+  "expo": {
+    "name": "Video Summarizer",
+    "slug": "video-summarizer",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#F5F5F5"
+    },
+    "updates": {
+      "fallbackToCacheTimeout": 0
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTabletMode": true,
+      "bundleIdentifier": "com.videosummarizer.app",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "需要访问您的相册以选择视频",
+        "NSCameraUsageDescription": "需要访问相机权限",
+        "NSMicrophoneUsageDescription": "需要访问麦克风权限"
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#F5F5F5"
+      },
+      "package": "com.videosummarizer.app",
+      "permissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.INTERNET"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-file-system"
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "2def0d5b-14d7-4ca3-80d1-84f6d7bdcaa8"
+      }
+    },
+    "owner": "zwing"
+  }
+}
