@@ -142,15 +142,17 @@ class _BottomNavBar extends StatelessWidget {
           ),
         ),
         child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
           children: List.generate(
             items.length,
-            (index) => GestureDetector(
-              onTap: () => onTap(index),
-              child: _NavItem_Widget(
-                icon: items[index].icon,
-                label: items[index].label,
-                isSelected: currentIndex == index,
+            (index) => Expanded(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => onTap(index),
+                child: _NavItem_Widget(
+                  icon: items[index].icon,
+                  label: items[index].label,
+                  isSelected: currentIndex == index,
+                ),
               ),
             ),
           ),
@@ -173,9 +175,12 @@ class _NavItem_Widget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOut,
+      width: double.infinity,
       padding: const EdgeInsets.symmetric(
-        horizontal: AppSpacing.lg,
+        horizontal: AppSpacing.xs,
         vertical: AppSpacing.sm,
       ),
       decoration: BoxDecoration(
@@ -184,6 +189,7 @@ class _NavItem_Widget extends StatelessWidget {
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Text(
             icon,
@@ -192,6 +198,10 @@ class _NavItem_Widget extends StatelessWidget {
           const SizedBox(height: 2),
           Text(
             label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            softWrap: false,
+            textAlign: TextAlign.center,
             style: AppFonts.tabLabel.copyWith(
               color: isSelected ? AppColors.white : AppColors.textTertiary,
             ),

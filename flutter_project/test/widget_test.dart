@@ -5,26 +5,38 @@
 // gestures. You can also use WidgetTester to find child widgets in the widget
 // tree, read text, and verify that the values of widget properties are correct.
 
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:video_summarizer/main.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
+  testWidgets('bottom navigation renders five tabs and switches screens', (
+    WidgetTester tester,
+  ) async {
     await tester.pumpWidget(const MyApp());
+    await tester.pumpAndSettle();
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    expect(find.text('SETTINGS'), findsOneWidget);
+    expect(find.text('VIDEO'), findsOneWidget);
+    expect(find.text('PROGRESS'), findsOneWidget);
+    expect(find.text('SUMMARY'), findsOneWidget);
+    expect(find.text('Q&A'), findsOneWidget);
+    expect(find.text('Video Summarizer'), findsOneWidget);
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    await tester.tap(find.text('VIDEO'));
+    await tester.pumpAndSettle();
+    expect(find.text('选择视频源'), findsOneWidget);
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    await tester.tap(find.text('PROGRESS'));
+    await tester.pumpAndSettle();
+    expect(find.text('处理中...'), findsOneWidget);
+
+    await tester.tap(find.text('SUMMARY'));
+    await tester.pumpAndSettle();
+    expect(find.text('请先处理视频'), findsOneWidget);
+
+    await tester.tap(find.text('Q&A'));
+    await tester.pumpAndSettle();
+    expect(find.text('时间旅行问答'), findsOneWidget);
   });
 }
