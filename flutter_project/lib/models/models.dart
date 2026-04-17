@@ -1,23 +1,15 @@
 /// 应用状态模型
 library models;
 
-/// 视频源类型
-enum VideoSourceType { youtube, local }
-
 /// 并行模式
 enum ConcurrencyMode { threadPool, sendAPI }
 
 /// 视频源
 class VideoSource {
-  final VideoSourceType type;
-  final String url;
-  final String? fileName;
+  final String fileName;
+  final String? filePath;
 
-  VideoSource({
-    required this.type,
-    required this.url,
-    this.fileName,
-  });
+  const VideoSource({required this.fileName, this.filePath});
 }
 
 /// 处理进度

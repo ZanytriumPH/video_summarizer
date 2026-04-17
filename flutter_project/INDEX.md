@@ -24,12 +24,6 @@
 - Windows/Mac/Linux指南
 - 开发工作流程
 
-### 🔄 我来自React Native，想了解迁移
-→ **[MIGRATION_GUIDE.md](MIGRATION_GUIDE.md)** (20分钟)
-- React Native vs Flutter对比
-- 技术栈变更
-- 功能映射
-
 ### 📚 我想全面了解项目
 → **[README.md](README.md)** (20分钟)
 - 项目完整介绍
@@ -60,7 +54,6 @@
 
 | 文档 | 内容 | 阅读时间 | 难度 |
 |------|------|---------|------|
-| [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md) | RN→Flutter迁移 | 20分钟 | ⭐⭐⭐ |
 | [QUICK_REFERENCE.md](QUICK_REFERENCE.md) | Dart/Flutter速查 | 按需查看 | ⭐⭐ |
 | [FILE_INVENTORY.md](FILE_INVENTORY.md) | 文件清单和统计 | 15分钟 | ⭐⭐ |
 
@@ -114,12 +107,6 @@
 2. 编辑: `lib/providers/app_state_provider.dart`
 3. 实现: HTTP调用替换模拟数据
 4. 测试: 验证功能
-
-### "我来自React Native"
-1. 阅读: [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md)
-2. 查看: [QUICK_REFERENCE.md](QUICK_REFERENCE.md)
-3. 对比: RN代码 vs Dart代码
-4. 上手: 开始编码
 
 ### "我遇到错误了"
 1. 查看: [GETTING_STARTED.md](GETTING_STARTED.md) 故障排除部分
@@ -177,7 +164,6 @@ Files:       file_picker
 1. ✅ [SETUP.md](SETUP.md) - 20分钟 (如果要开发)
 2. ✅ [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md) - 10分钟
 3. ✅ [QUICK_REFERENCE.md](QUICK_REFERENCE.md) - 按需查看
-4. ✅ [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md) - 20分钟 (如来自RN)
 
 ---
 

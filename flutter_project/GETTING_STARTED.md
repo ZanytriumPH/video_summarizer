@@ -36,7 +36,7 @@ flutter run
    - 点击"保存配置"
 
 2. **🎬 Video Selection**
-   - 输入YouTube链接或选择本地文件
+   - 选择本地视频文件
    - 点击"下一步"
 
 3. **⏳ Progress**
@@ -61,7 +61,6 @@ flutter run
 | [README.md](README.md) | 项目概述和功能 | 10分钟 |
 | [SETUP.md](SETUP.md) | 开发环境配置 | 15分钟 |
 | [USER_GUIDE.md](USER_GUIDE.md) | 应用功能说明 | 10分钟 |
-| [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md) | RN到Flutter迁移 | 15分钟 |
 | [QUICK_REFERENCE.md](QUICK_REFERENCE.md) | Dart/Flutter速查 | 按需查看 |
 | [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md) | 项目完成总结 | 5分钟 |
 

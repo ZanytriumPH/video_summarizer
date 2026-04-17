@@ -69,9 +69,8 @@ flutter_project/
 
 ### 2. 数据模型 (models.dart)
 
-✅ **VideoSourceType** - 视频源类型枚举
 ✅ **ConcurrencyMode** - 并行模式枚举
-✅ **VideoSource** - 视频源数据
+✅ **VideoSource** - 本地视频文件数据
 ✅ **ProcessingProgress** - 处理进度
 ✅ **SummaryResult** - 总结结果
 ✅ **TimeTravelResult** - 时间旅行问答结果
@@ -104,9 +103,7 @@ flutter_project/
 - 配置保存功能
 
 #### 🎬 Video Selection Screen (video_selection_screen.dart)
-- YouTube URL输入
 - 本地文件选择（集成file_picker）
-- 双选项卡切换
 - 下一步按钮状态管理
 
 #### ⏳ Processing Progress Screen (processing_progress_screen.dart)
@@ -203,7 +200,7 @@ percent_indicator: ^4.1.1  # 进度显示
 ### ✅ 完全实现的功能
 - 底部导航5屏切换
 - API配置和保存
-- 视频源选择（YouTube/本地）
+- 本地视频选择与上传
 - 实时进度显示
 - 总结结果展示
 - 时间旅行问答系统
@@ -266,14 +263,6 @@ percent_indicator: ^4.1.1  # 进度显示
 - **字体样式**: 6种
 - **屏幕数量**: 5个
 - **UI组件**: 20+个自定义组件
-
-## 迁移成果
-
-✅ 从React Native成功迁移到Flutter  
-✅ 保持了原有的UI/UX设计  
-✅ 改进了代码架构  
-✅ 完整的文档覆盖  
-✅ 生产级别的代码质量  
 
 ---
 

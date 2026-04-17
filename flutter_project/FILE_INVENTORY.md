@@ -91,12 +91,10 @@
 #### 6. **lib/screens/video_selection_screen.dart** (220 行)
 - **功能**: 🎬 视频选择屏幕
 - **组件**:
-  - YouTube URL输入选项
   - 本地文件上传选项
   - 文件选择器集成
   - 下一步按钮
 - **交互**:
-  - 选项卡切换
   - 文件选择
   - 条件启用/禁用按钮
   - 进度启动
@@ -229,17 +227,7 @@
   - 故障排除
   - 隐私和安全
 
-#### 19. **MIGRATION_GUIDE.md** (300+ 行)
-- **内容**:
-  - React Native到Flutter迁移对比
-  - 项目结构差异
-  - 技术栈变更
-  - 功能映射
-  - 架构差异
-  - 迁移检查清单
-  - 性能优化建议
-
-#### 20. **QUICK_REFERENCE.md** (250+ 行)
+#### 19. **QUICK_REFERENCE.md** (250+ 行)
 - **内容**:
   - Dart基础语法
   - Flutter Widget基础
@@ -252,7 +240,7 @@
   - HTTP请求
   - 本地存储
 
-#### 21. **PROJECT_SUMMARY.md** (200+ 行)
+#### 20. **PROJECT_SUMMARY.md** (200+ 行)
 - **内容**:
   - 项目完成总结
   - 完整文件结构
@@ -289,7 +277,6 @@
 | README.md | 300+ |
 | SETUP.md | 400+ |
 | USER_GUIDE.md | 300+ |
-| MIGRATION_GUIDE.md | 300+ |
 | QUICK_REFERENCE.md | 250+ |
 | PROJECT_SUMMARY.md | 200+ |
 
@@ -397,7 +384,6 @@ flutter run
 - **README.md**: 项目整体介绍
 - **SETUP.md**: 环境配置
 - **USER_GUIDE.md**: 功能使用
-- **MIGRATION_GUIDE.md**: 从RN迁移
 - **QUICK_REFERENCE.md**: 快速参考
 
 ### 官方资源

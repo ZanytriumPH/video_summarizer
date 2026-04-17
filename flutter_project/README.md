@@ -19,9 +19,8 @@ Video Summarizer是一个多模态智能视频总结应用，支持：
 - 选择并行处理模式（ThreadPool/Send API）
 
 ### 2. 🎬 Video Selection 视频选择屏幕
-- YouTube URL输入
 - 本地视频文件上传
-- 拖拽上传支持
+- 点击选择本地视频
 
 ### 3. ⏳ Processing Progress 处理进度屏幕
 - 实时显示整体进度

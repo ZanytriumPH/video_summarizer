@@ -25,7 +25,9 @@ void main() {
 
     await tester.tap(find.text('VIDEO'));
     await tester.pumpAndSettle();
-    expect(find.text('选择视频源'), findsOneWidget);
+    expect(find.text('选择本地视频'), findsOneWidget);
+    expect(find.text('上传本地视频进行总结'), findsOneWidget);
+    expect(find.text('YouTube URL'), findsNothing);
 
     await tester.tap(find.text('PROGRESS'));
     await tester.pumpAndSettle();
