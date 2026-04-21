@@ -458,7 +458,7 @@ def answer_question_at_timestamp(
                         "type": "image_url",
                         "image_url": {
                             "url": f"data:image/jpeg;base64,{frame_image_b64}",
-                            "detail": "auto",
+                            "detail": "low",
                         },
                     }
                 )
