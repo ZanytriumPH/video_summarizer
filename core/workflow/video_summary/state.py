@@ -1,18 +1,32 @@
 from typing import TypedDict, List, Dict, Any, Annotated
 
+
+def _deep_merge_dict(base: Dict[str, Any], update: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    递归深度合并字典：
+    - 同名键且双方为 dict：继续递归合并
+    - 其他类型：update 覆盖 base
+    """
+    merged = dict(base)
+    for key, value in update.items():
+        if isinstance(merged.get(key), dict) and isinstance(value, dict):
+            merged[key] = _deep_merge_dict(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
 def _merge_chunk_results(base: List[Dict], update: List[Dict]) -> List[Dict]:
     """
     深度合并两个并行分支的 chunk_results，确保来自不同节点的更新不会相互覆盖。
     
     策略：
     1. 按 chunk_id 构建索引，使用 base 中的原始顺序
-    2. 对 latency_ms (dict) 进行递归合并（保留所有时间点记录）
-    3. 其他字段默认进行覆盖更新（新值优先，但不删除现有字段）
-    4. 保持 chunk_results 列表的与 chunk_plan 一致的顺序
+    2. chunk 级对象使用递归深度合并（适配增量差异写入）
+    3. 保持 chunk_results 列表的顺序稳定
     
     Args:
-        base: 第一个分支返回的 chunk_results（如 chunk_audio_analyzer_node）
-        update: 第二个分支返回的 chunk_results（如 chunk_vision_analyzer_node）
+        base: 第一个并行分支返回的 chunk_results（如 audio worker 聚合结果）
+        update: 第二个并行分支返回的 chunk_results（如 vision worker 聚合结果）
     
     Returns:
         已合并的 chunk_results，包含来自两个分支的所有更新
@@ -46,20 +60,8 @@ def _merge_chunk_results(base: List[Dict], update: List[Dict]) -> List[Dict]:
             chunk_id = _extract_chunk_id(item)
             if chunk_id:
                 if chunk_id in result_map:
-                    # 深度合并策略
                     existing = result_map[chunk_id]
-                    for key, val in item.items():
-                        if key == "latency_ms":
-                            # latency_ms 是 dict，需要递归合并而不是覆盖
-                            if isinstance(existing.get(key), dict) and isinstance(val, dict):
-                                existing[key].update(val)
-                            else:
-                                existing[key] = val
-                        else:
-                            # 其他字段：只有当不存在时才添加，存在则保留（基于 base 优先）
-                            # 但如果是空字符串或初始值，则更新
-                            if key not in existing or not existing[key]:
-                                existing[key] = val
+                    result_map[chunk_id] = _deep_merge_dict(existing, item)
                 else:
                     # 新的 chunk_id，直接加入
                     result_map[chunk_id] = dict(item)
@@ -88,7 +90,6 @@ def _merge_chunk_results(base: List[Dict], update: List[Dict]) -> List[Dict]:
 
 class VideoSummaryState(TypedDict):
     # 输入层数据
-    concurrency_mode: str           # 并发模式：threadpool / send_api
     transcript: str                 # 语音转录结果，通常为 Whisper verbose_json 字符串
     keyframes: List[Dict]           # 关键帧列表，元素至少包含 time，可能包含 image 或 frame_file
     keyframes_base_path: str        # 关键帧文件引用模式下的根目录
@@ -103,10 +104,9 @@ class VideoSummaryState(TypedDict):
 
     # 分片执行中间态
     video_duration_seconds: int     # 写入: chunk_planner_node；消费: 主要用于观测和测试，当前主链路不直接依赖
-    chunk_plan: List[Dict]          # 写入: chunk_planner_node；消费: map_dispatch_node / chunk_audio_analyzer_node / chunk_vision_analyzer_node / chunk_synthesizer_node / chunk_aggregator_node / Send API 路由函数
+    chunk_plan: List[Dict]          # 写入: chunk_planner_node；消费: map_dispatch_node / worker 路由函数 / chunk_synthesizer_node / chunk_aggregator_node
     chunk_results: Annotated[List[Dict], _merge_chunk_results]  # 写入: audio/vision/synthesizer 各节点与对应 worker；消费: synthesis_barrier_node / chunk_synthesizer_node / chunk_aggregator_node / 进度上报逻辑
     current_chunk: Dict             # 写入: route_audio_send_tasks / route_vision_send_tasks；消费: chunk_audio_worker_node / chunk_vision_worker_node
-    current_chunk_base_item: Dict   # 写入: route_audio_send_tasks / route_vision_send_tasks；消费: chunk_audio_worker_node / chunk_vision_worker_node
     current_synthesis_chunk: Dict   # 写入: route_synthesis_send_tasks；消费: chunk_synthesizer_worker_node
     current_synthesis_base_item: Dict  # 写入: route_synthesis_send_tasks；消费: chunk_synthesizer_worker_node
     chunk_audio_insights: Dict      # 预留字段；当前主链路未稳定写入，未来可用于按 chunk_id 建立音频侧映射缓存

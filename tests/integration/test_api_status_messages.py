@@ -90,8 +90,8 @@ class TestApiStatusMessages(unittest.TestCase):
             mock_app.stream.return_value = iter([
                 {"chunk_planner_node": {"chunk_plan": [{"chunk_id": "c1"}]}},
                 {"map_dispatch_node": {}},
-                {"chunk_audio_node": {"chunk_results": [{"chunk_id": "c1", "audio_insights": "test"}]}},
-                {"chunk_vision_node": {"chunk_results": [{"chunk_id": "c1", "vision_insights": "test"}]}},
+                {"chunk_audio_worker_node": {"chunk_results": [{"chunk_id": "c1", "audio_insights": "test"}]}} ,
+                {"chunk_vision_worker_node": {"chunk_results": [{"chunk_id": "c1", "vision_insights": "test"}]}} ,
                 {"chunk_synthesizer_node": {"chunk_results": [{"chunk_id": "c1", "chunk_summary": "test"}]}},
             ])
             
@@ -279,7 +279,6 @@ class TestApiStatusMessages(unittest.TestCase):
                 transcript=transcript,
                 keyframes=keyframes,
                 status_callback=mock_callback,
-                concurrency_mode="send_api",
             )
 
         progress_msgs = [m for m in messages if isinstance(m, str) and m.startswith("[[PROGRESS]]")]

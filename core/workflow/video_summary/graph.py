@@ -9,8 +9,8 @@ from core.workflow.video_summary.nodes.map_dispatcher import (
     route_synthesis_send_tasks,
     route_vision_send_tasks,
 )
-from core.workflow.video_summary.nodes.chunk_audio_analyzer import chunk_audio_analyzer_node, chunk_audio_worker_node
-from core.workflow.video_summary.nodes.chunk_vision_analyzer import chunk_vision_analyzer_node, chunk_vision_worker_node
+from core.workflow.video_summary.nodes.chunk_audio_analyzer import chunk_audio_worker_node
+from core.workflow.video_summary.nodes.chunk_vision_analyzer import chunk_vision_worker_node
 from core.workflow.video_summary.nodes.chunk_synthesizer import chunk_synthesizer_node, chunk_synthesizer_worker_node
 from core.workflow.video_summary.nodes.chunk_aggregator import chunk_aggregator_node
 from core.workflow.video_summary.nodes.human_gate import human_gate_node
@@ -30,25 +30,7 @@ from core.workflow.video_summary.edges.router import (
     ROUTE_USEFUL,
 )
 
-CONCURRENCY_MODE_THREADPOOL = "threadpool"
-CONCURRENCY_MODE_SEND_API = "send_api"
-
-
-def _add_chunk_pipeline_for_threadpool(workflow: StateGraph) -> None:
-    """
-    当前稳定路径：图级并行 + 节点内 ThreadPoolExecutor。
-    """
-    workflow.add_edge(START, "chunk_planner_node")
-    workflow.add_edge("chunk_planner_node", "map_dispatch_node")
-
-    workflow.add_edge("map_dispatch_node", "chunk_audio_node")
-    workflow.add_edge("map_dispatch_node", "chunk_vision_node")
-
-    workflow.add_edge("chunk_audio_node", "chunk_synthesizer_node")
-    workflow.add_edge("chunk_vision_node", "chunk_synthesizer_node")
-
-
-def _add_chunk_pipeline_for_send_api_scaffold(workflow: StateGraph) -> None:
+def _add_chunk_pipeline_for_send_api(workflow: StateGraph) -> None:
     """
     Send API 模式：音频和视觉分支采用图级 fan-out，融合阶段在 barrier 后二次分发。
     """
@@ -66,7 +48,7 @@ def _add_chunk_pipeline_for_send_api_scaffold(workflow: StateGraph) -> None:
     workflow.add_edge("chunk_synthesizer_worker_node", "chunk_synthesizer_node")
 
 
-def build_video_summary_graph(checkpointer: Any = None, concurrency_mode: str = CONCURRENCY_MODE_THREADPOOL) -> Any:
+def build_video_summary_graph(checkpointer: Any = None) -> Any:
     """
     构建视频总结工作流图。
     主干流程为：分片规划 -> 音频/视觉分析 -> 分片融合 -> 聚合成文 -> 质量审查闭环。
@@ -78,9 +60,7 @@ def build_video_summary_graph(checkpointer: Any = None, concurrency_mode: str = 
     workflow.add_node("chunk_planner_node", chunk_planner_node) # type: ignore
     workflow.add_node("map_dispatch_node", map_dispatch_node) # type: ignore
     workflow.add_node("synthesis_barrier_node", synthesis_barrier_node) # type: ignore
-    workflow.add_node("chunk_audio_node", chunk_audio_analyzer_node) # type: ignore
     workflow.add_node("chunk_audio_worker_node", chunk_audio_worker_node) # type: ignore
-    workflow.add_node("chunk_vision_node", chunk_vision_analyzer_node) # type: ignore
     workflow.add_node("chunk_vision_worker_node", chunk_vision_worker_node) # type: ignore
     workflow.add_node("chunk_synthesizer_worker_node", chunk_synthesizer_worker_node) # type: ignore
     workflow.add_node("chunk_synthesizer_node", chunk_synthesizer_node) # type: ignore
@@ -88,11 +68,7 @@ def build_video_summary_graph(checkpointer: Any = None, concurrency_mode: str = 
     workflow.add_node("human_gate_node", human_gate_node) # type: ignore
 
     # 3. 编排拓扑连线
-    normalized_mode = (concurrency_mode or CONCURRENCY_MODE_THREADPOOL).strip().lower()
-    if normalized_mode == CONCURRENCY_MODE_SEND_API:
-        _add_chunk_pipeline_for_send_api_scaffold(workflow)
-    else:
-        _add_chunk_pipeline_for_threadpool(workflow)
+    _add_chunk_pipeline_for_send_api(workflow)
 
     # 分片结果先聚合，再交由成文节点生成草稿
     workflow.add_edge("chunk_synthesizer_node", "chunk_aggregator_node")

@@ -44,7 +44,6 @@ class VideoSummaryService:
         user_prompt: str = "",
         status_callback: Optional[Callable[[str], None]] = None,
         thread_id: str = "",
-        concurrency_mode: str = "",
     ) -> Dict[str, Any]:
         """
         统一的内部处理逻辑：
@@ -90,7 +89,6 @@ class VideoSummaryService:
                 user_prompt=user_prompt,
                 status_callback=status_callback,
                 thread_id=resolved_thread_id,
-                concurrency_mode=concurrency_mode,
             )
             workflow_ms = int((time.perf_counter() - workflow_started_at) * 1000)
 
@@ -131,7 +129,6 @@ class VideoSummaryService:
         user_prompt: str = "",
         status_callback: Optional[Callable[[str], None]] = None,
         thread_id: str = "",
-        concurrency_mode: str = "",
     ) -> Dict[str, Any]:
         """
         第一阶段入口（URL 来源）：下载视频，执行分片分析，返回待审批包。
@@ -147,7 +144,6 @@ class VideoSummaryService:
             user_prompt=user_prompt,
             status_callback=status_callback,
             thread_id=thread_id,
-            concurrency_mode=concurrency_mode,
         )
 
     def analyze_uploaded_video(
@@ -157,7 +153,6 @@ class VideoSummaryService:
         user_prompt: str = "",
         status_callback: Optional[Callable[[str], None]] = None,
         thread_id: str = "",
-        concurrency_mode: str = "",
     ) -> Dict[str, Any]:
         """
         第一阶段入口（上传文件来源）：接收上传文件，执行分片分析，返回待审批包。
@@ -177,7 +172,6 @@ class VideoSummaryService:
             user_prompt=user_prompt,
             status_callback=status_callback,
             thread_id=thread_id,
-            concurrency_mode=concurrency_mode,
         )
 
     def finalize_summary(

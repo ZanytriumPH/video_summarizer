@@ -50,9 +50,7 @@ def map_dispatch_node(state: VideoSummaryState) -> Dict[str, Any]:
         {
             "dispatch_ready": True,
             "chunk_count": len(chunk_plan),
-            "dispatch_strategy": "send-api-dual-pilot"
-            if str(state.get("concurrency_mode", "threadpool")).strip().lower() == "send_api"
-            else "threadpool-node-parallel",
+            "dispatch_strategy": "send-api-dual-pilot",
         }
     )
 
@@ -125,20 +123,9 @@ def route_audio_send_tasks(state: VideoSummaryState) -> List[Send]:
     """
     为音频分析阶段生成 Send API 派发任务。
     """
-    concurrency_mode = str(state.get("concurrency_mode", "threadpool")).strip().lower()
-    if concurrency_mode != "send_api":
-        return []
-
     chunk_plan = state.get("chunk_plan", [])
     if not isinstance(chunk_plan, list):
         return []
-
-    existing_results = state.get("chunk_results", [])
-    existing_map: Dict[str, Dict[str, Any]] = {
-        str(item.get("chunk_id", "")).strip(): dict(item)
-        for item in existing_results
-        if isinstance(item, dict) and str(item.get("chunk_id", "")).strip()
-    }
 
     sends: List[Send] = []
     transcript = state.get("transcript", "")
@@ -157,7 +144,6 @@ def route_audio_send_tasks(state: VideoSummaryState) -> List[Send]:
                     "transcript": transcript,
                     "user_prompt": user_prompt,
                     "current_chunk": chunk,
-                    "current_chunk_base_item": existing_map.get(chunk_id, {"chunk_id": chunk_id}),
                 },
             )
         )
@@ -169,20 +155,9 @@ def route_vision_send_tasks(state: VideoSummaryState) -> List[Send]:
     """
     为视觉分析阶段生成 Send API 派发任务。
     """
-    concurrency_mode = str(state.get("concurrency_mode", "threadpool")).strip().lower()
-    if concurrency_mode != "send_api":
-        return []
-
     chunk_plan = state.get("chunk_plan", [])
     if not isinstance(chunk_plan, list):
         return []
-
-    existing_results = state.get("chunk_results", [])
-    existing_map: Dict[str, Dict[str, Any]] = {
-        str(item.get("chunk_id", "")).strip(): dict(item)
-        for item in existing_results
-        if isinstance(item, dict) and str(item.get("chunk_id", "")).strip()
-    }
 
     sends: List[Send] = []
     keyframes = state.get("keyframes", [])
@@ -203,7 +178,6 @@ def route_vision_send_tasks(state: VideoSummaryState) -> List[Send]:
                     "keyframes_base_path": keyframes_base_path,
                     "user_prompt": user_prompt,
                     "current_chunk": chunk,
-                    "current_chunk_base_item": existing_map.get(chunk_id, {"chunk_id": chunk_id}),
                 },
             )
         )
@@ -215,12 +189,8 @@ def route_synthesis_send_tasks(state: VideoSummaryState) -> List[Send]:
     """
     为分片融合阶段生成 Send API 派发任务。
 
-    仅在 send_api 模式下，且所有 chunk 已同时具备音频和视觉洞察时才触发。
+    仅在所有 chunk 已同时具备音频和视觉洞察时触发。
     """
-    concurrency_mode = str(state.get("concurrency_mode", "threadpool")).strip().lower()
-    if concurrency_mode != "send_api":
-        return []
-
     chunk_plan = state.get("chunk_plan", [])
     if not isinstance(chunk_plan, list) or not chunk_plan:
         return []

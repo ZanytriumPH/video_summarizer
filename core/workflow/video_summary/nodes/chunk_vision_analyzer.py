@@ -1,12 +1,11 @@
 import os
 import time
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List
 
 from openai import OpenAI
 
-from config.settings import CHUNK_MAX_TOOL_CALLS, ENABLE_CHUNK_CACHE, MAP_MAX_PARALLELISM
+from config.settings import CHUNK_MAX_TOOL_CALLS, ENABLE_CHUNK_CACHE
 from core.workflow.video_summary.state import VideoSummaryState
 from core.workflow.video_summary.tools.search_tools import execute_tavily_search
 from core.workflow.video_summary.utils.frame_utils import resolve_frame_image_base64
@@ -17,10 +16,6 @@ _VISION_SEARCH_CACHE_LOCK = threading.Lock()
 
 FramePayload = Dict[str, Any]
 ChunkResult = Dict[str, Any]
-
-
-def _as_dict(value: Any) -> Dict[str, Any]:
-    return value if isinstance(value, dict) else {}
 
 
 def _search_with_cache(query: str) -> str:
@@ -84,7 +79,6 @@ def _process_single_chunk_vision(
     keyframes: List[FramePayload],
     keyframes_base_path: str,
     user_prompt: str,
-    base_item: ChunkResult,
 ) -> tuple[str, ChunkResult]:
     started = time.perf_counter()
 
@@ -115,112 +109,21 @@ def _process_single_chunk_vision(
 
     latency_ms = int((time.perf_counter() - started) * 1000)
 
-    merged = dict(base_item)
-    evidence_refs = _as_dict(merged.get("evidence_refs"))
-    token_usage = _as_dict(merged.get("token_usage"))
-    latency_info = _as_dict(merged.get("latency_ms"))
-    merged.update(
-        {
-            "chunk_id": chunk_id,
-            "vision_insights": insights,
-            "evidence_refs": {
-                **evidence_refs,
-                "keyframe_indexes": frame_indexes,
-                "vision_searches": searches,
-            },
-            "token_usage": {
-                **token_usage,
-                "vision": 0,
-            },
-            "latency_ms": {
-                **latency_info,
-                "vision": latency_ms,
-            },
-        }
-    )
-    return chunk_id, merged
-
-
-def chunk_vision_analyzer_node(state: VideoSummaryState) -> dict:
-    """
-    分片视觉分析节点。
-
-    地位:
-    - 位于 chunk_plan 之后，是多模态分析链路中的视觉分支。
-    - 与 chunk_audio_analyzer_node 并行执行，为后续融合提供画面证据。
-
-    任务:
-    - 读取每个 chunk 命中的关键帧。
-    - 统一解析 image/frame_file，构造可送入视觉模型的输入。
-    - 调用多模态 LLM 生成 vision_insights。
-    - 按需补充 vision_searches、latency_ms 等元数据。
-
-    主要输入:
-    - state["chunk_plan"]: 每个 chunk 对应的 keyframe_indexes。
-    - state["keyframes"] / state["keyframes_base_path"]
-    - state["user_prompt"]
-    - state["chunk_results"]
-
-    主要输出:
-    - chunk_results: 为每个 chunk 补充 vision_insights 和视觉侧证据元数据。
-    """
-    chunk_plan = state.get("chunk_plan", [])
-    keyframes = state.get("keyframes", [])
-    keyframes_base_path = str(state.get("keyframes_base_path", ""))
-    user_prompt = state.get("user_prompt", "")
-
-    if not isinstance(chunk_plan, list) or not chunk_plan:
-        return {"chunk_results": state.get("chunk_results", [])}
-    if not isinstance(keyframes, list):
-        keyframes = []
-
-    existing = state.get("chunk_results", [])
-    result_map: Dict[str, ChunkResult] = {
-        str(item.get("chunk_id", "")): dict(item)
-        for item in existing
-        if isinstance(item, dict) and str(item.get("chunk_id", "")).strip()
+    delta: ChunkResult = {
+        "chunk_id": chunk_id,
+        "vision_insights": insights,
+        "evidence_refs": {
+            "keyframe_indexes": frame_indexes,
+            "vision_searches": searches,
+        },
+        "token_usage": {
+            "vision": 0,
+        },
+        "latency_ms": {
+            "vision": latency_ms,
+        },
     }
-
-    valid_jobs: List[tuple[str, List[int]]] = []
-    for chunk in chunk_plan:
-        if not isinstance(chunk, dict):
-            continue
-        chunk_id = str(chunk.get("chunk_id", "")).strip()
-        if not chunk_id:
-            continue
-        frame_indexes = chunk.get("keyframe_indexes", [])
-        if not isinstance(frame_indexes, list):
-            frame_indexes = []
-        valid_jobs.append((chunk_id, frame_indexes))
-
-    max_workers = max(1, MAP_MAX_PARALLELISM)
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [
-            executor.submit(
-                _process_single_chunk_vision,
-                chunk_id,
-                frame_indexes,
-                keyframes,
-                keyframes_base_path,
-                user_prompt,
-                result_map.get(chunk_id, {"chunk_id": chunk_id}),
-            )
-            for chunk_id, frame_indexes in valid_jobs
-        ]
-
-        for future in as_completed(futures):
-            chunk_id, merged = future.result()
-            result_map[chunk_id] = merged
-
-    ordered_results: List[ChunkResult] = []
-    for chunk in chunk_plan:
-        if not isinstance(chunk, dict):
-            continue
-        chunk_id = str(chunk.get("chunk_id", "")).strip()
-        if chunk_id and chunk_id in result_map:
-            ordered_results.append(result_map[chunk_id])
-
-    return {"chunk_results": ordered_results}
+    return chunk_id, delta
 
 
 def chunk_vision_worker_node(state: VideoSummaryState) -> dict:
@@ -228,7 +131,7 @@ def chunk_vision_worker_node(state: VideoSummaryState) -> dict:
     Send API 路径下的单分片视觉分析 worker。
 
     地位:
-    - 是 chunk_vision_analyzer_node 的单分片版本，用于图级 fan-out。
+    - Send API 图级 fan-out 下的单分片执行单元。
 
     任务:
     - 仅读取 current_chunk 命中的关键帧。
@@ -236,7 +139,6 @@ def chunk_vision_worker_node(state: VideoSummaryState) -> dict:
 
     主要输入:
     - state["current_chunk"]
-    - state["current_chunk_base_item"]
     - state["keyframes"] / state["keyframes_base_path"]
     - state["user_prompt"]
 
@@ -261,17 +163,12 @@ def chunk_vision_worker_node(state: VideoSummaryState) -> dict:
     keyframes_base_path = str(state.get("keyframes_base_path", ""))
     user_prompt = str(state.get("user_prompt", ""))
 
-    base_item = state.get("current_chunk_base_item", {"chunk_id": chunk_id})
-    if not isinstance(base_item, dict):
-        base_item = {"chunk_id": chunk_id}
-
     _, merged = _process_single_chunk_vision(
         chunk_id,
         frame_indexes,
         keyframes,
         keyframes_base_path,
         user_prompt,
-        base_item,
     )
 
     return {"chunk_results": [merged]}
