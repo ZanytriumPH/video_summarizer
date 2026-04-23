@@ -68,23 +68,5 @@ KEYFRAME_REFERENCE_INCLUDE_INLINE_IMAGE = os.getenv(
 ).strip().lower() in {"1", "true", "yes", "on"}
 KEYFRAME_IMAGE_EXTENSION = os.getenv("KEYFRAME_IMAGE_EXTENSION", "jpg").strip().lower() or "jpg"
 
-# 并发模式配置（方案B阶段1：内部开关，不暴露前端）
-SUPPORTED_CONCURRENCY_MODES = {"threadpool", "send_api"}
-CONCURRENCY_MODE = os.getenv("CONCURRENCY_MODE", "threadpool").strip().lower()
-if CONCURRENCY_MODE not in SUPPORTED_CONCURRENCY_MODES:
-    print(
-        f"[settings] Invalid CONCURRENCY_MODE='{CONCURRENCY_MODE}', fallback to 'threadpool'."
-    )
-    CONCURRENCY_MODE = "threadpool"
-
-
-def resolve_concurrency_mode(mode: str = "") -> str:
-    """
-    解析并规范化并发模式。
-    - 传入空值时回退到全局配置 CONCURRENCY_MODE
-    - 非法值统一降级为 threadpool
-    """
-    candidate = (mode or CONCURRENCY_MODE).strip().lower()
-    if candidate in SUPPORTED_CONCURRENCY_MODES:
-        return candidate
-    return "threadpool"
+# 并发模式配置（架构瘦身后固定为 send_api）
+CONCURRENCY_MODE = "send_api"

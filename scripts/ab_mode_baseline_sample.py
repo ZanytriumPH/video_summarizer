@@ -14,23 +14,13 @@ from core.workflow.api import analyze_video
 
 class _FakeWorkflowApp:
     def stream(self, initial_state, config, stream_mode="updates"):
-        mode = str(initial_state.get("concurrency_mode", "threadpool")).strip().lower()
-        if mode == "send_api":
-            yield {
-                "chunk_audio_worker_node": {
-                    "chunk_results": [
-                        {"chunk_id": "chunk-000", "audio_insights": "audio-send", "latency_ms": {"audio": 4}}
-                    ]
-                }
+        yield {
+            "chunk_audio_worker_node": {
+                "chunk_results": [
+                    {"chunk_id": "chunk-000", "audio_insights": "audio-send", "latency_ms": {"audio": 4}}
+                ]
             }
-        else:
-            yield {
-                "chunk_audio_node": {
-                    "chunk_results": [
-                        {"chunk_id": "chunk-000", "audio_insights": "audio-thread", "latency_ms": {"audio": 4}}
-                    ]
-                }
-            }
+        }
 
         yield {
             "chunk_vision_node": {
@@ -54,7 +44,7 @@ class _FakeWorkflowApp:
         yield {"fusion_drafter_node": {"draft_summary": "final summary", "revision_count": 1}}
 
 
-def _run_mode(mode: str, iterations: int = 30) -> Dict[str, Any]:
+def _run_send_api(iterations: int = 30) -> Dict[str, Any]:
     workflow_durations: List[int] = []
     final_state_sizes: List[int] = []
     failures: List[str] = []
@@ -78,8 +68,7 @@ def _run_mode(mode: str, iterations: int = 30) -> Dict[str, Any]:
                                         {"time": "00:02", "image": "y"},
                                     ],
                                     user_prompt="focus",
-                                    thread_id=f"ab-{mode}-{i}",
-                                    concurrency_mode=mode,
+                                    thread_id=f"ab-send_api-{i}",
                                 )
         except Exception as exc:
             failures.append(str(exc))
@@ -88,7 +77,7 @@ def _run_mode(mode: str, iterations: int = 30) -> Dict[str, Any]:
     success_rate = (success_count / iterations) * 100 if iterations else 0.0
 
     return {
-        "mode": mode,
+        "mode": "send_api",
         "iterations": iterations,
         "success_count": success_count,
         "failure_count": len(failures),
@@ -103,10 +92,8 @@ def _run_mode(mode: str, iterations: int = 30) -> Dict[str, Any]:
 
 
 def main() -> None:
-    threadpool = _run_mode("threadpool", iterations=30)
-    send_api = _run_mode("send_api", iterations=30)
-
-    print(json.dumps({"threadpool": threadpool, "send_api": send_api}, ensure_ascii=False, indent=2))
+    send_api = _run_send_api(iterations=30)
+    print(json.dumps({"send_api": send_api}, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

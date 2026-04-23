@@ -17,8 +17,6 @@ from core.workflow.time_travel import (
 from config.settings import (
     CHECKPOINT_BACKEND,
     CHECKPOINT_DB_URL,
-    CONCURRENCY_MODE,
-    resolve_concurrency_mode,
     ENABLE_METRICS_LOGGING,
     METRICS_SAMPLE_RATE,
     TEMP_FRAMES_DIR,
@@ -48,7 +46,6 @@ def analyze_video(
     user_prompt: str = "请结合画面与语音，给出一个全面、客观的高质量视频总结。",
     status_callback: Optional[Callable[[str], None]] = None,
     thread_id: str = "",
-    concurrency_mode: str = "",
 ) -> Dict[str, Any]:
     """
     第一阶段：执行分片规划、分析、聚合并进入人类审批关口。
@@ -62,16 +59,12 @@ def analyze_video(
     run_started_at = time.perf_counter()
 
     checkpointer = create_checkpointer(CHECKPOINT_BACKEND, CHECKPOINT_DB_URL)
-    resolved_mode = resolve_concurrency_mode(concurrency_mode or CONCURRENCY_MODE)
-    workflow_app = build_video_summary_graph(
-        checkpointer=checkpointer,
-        concurrency_mode=resolved_mode,
-    )
+    workflow_app = build_video_summary_graph(checkpointer=checkpointer)
     resolved_thread_id = ensure_thread_id(thread_id)
 
     if status_callback:
         status_callback(f"🧵 [Session] 当前会话 thread_id: {resolved_thread_id}")
-        status_callback(f"🛠️ [Concurrency] 当前并发模式: {resolved_mode}")
+        status_callback("🛠️ [Concurrency] 当前并发模式: send_api")
 
     if metrics_enabled:
         keyframes_estimate_bytes = 0
@@ -84,7 +77,7 @@ def analyze_video(
             metrics_logger,
             "workflow_started",
             thread_id=resolved_thread_id,
-            concurrency_mode=resolved_mode,
+            concurrency_mode="send_api",
             transcript_chars=len(transcript),
             keyframes_count=len(keyframes),
             keyframes_estimate_bytes=keyframes_estimate_bytes,
@@ -95,7 +88,6 @@ def analyze_video(
         "transcript": transcript,
         "keyframes": keyframes,
         "keyframes_base_path": str(TEMP_FRAMES_DIR),
-        "concurrency_mode": resolved_mode,
         "user_prompt": user_prompt,
         "aggregated_chunk_insights": "",
         "human_edited_aggregated_insights": "",
@@ -110,9 +102,7 @@ def analyze_video(
     node_msg_map = {
         "chunk_planner_node": "📋 [Plan Checker] 正在以时间戳为锚点，将视频逻辑分割成多个 120 秒粒度的分片任务...",
         "map_dispatch_node": "🗺️ [Dispatcher] 正在为微智能体群编排分片执行配方，准备发起并行实时处理...",
-        "chunk_audio_node": "🎧 [Chunk Audio Micro-Agent] 微线程 1&2&3 并行：正在对每个 120s 分片逐一进行语音深度梳理与查证搜索...",
         "chunk_audio_worker_node": "🎧 [Chunk Audio Send Worker] 图级 fan-out：正在处理单分片音频洞察...",
-        "chunk_vision_node": "📸 [Chunk Vision Micro-Agent] 并行通道：正同步对应时间片的关键帧进行视觉特征提取与图表解析...",
         "chunk_vision_worker_node": "📸 [Chunk Vision Send Worker] 图级 fan-out：正在处理单分片视觉洞察...",
         "synthesis_barrier_node": "🧱 [Synthesis Barrier] 正在等待音视频分片证据全部汇聚，准备进入融合分发路由...",
         "chunk_synthesizer_worker_node": "⚡ [Chunk Synthesizer Send Worker] 图级 fan-out：正在处理单分片融合总结...",
@@ -142,7 +132,6 @@ def analyze_video(
         payload = {
             "type": "chunk_progress",
             "stage": stage,
-            "concurrency_mode": resolved_mode,
             "total_chunks": safe_total,
             "audio_done": audio_done,
             "vision_done": vision_done,
@@ -178,7 +167,7 @@ def analyze_video(
             if isinstance(chunk_plan, list):
                 total_chunks = len(chunk_plan)
 
-            if resolved_mode == "send_api" and node_name in {
+            if node_name in {
                 "chunk_audio_worker_node",
                 "chunk_vision_worker_node",
                 "chunk_synthesizer_worker_node",
@@ -221,7 +210,7 @@ def analyze_video(
                     metrics_logger,
                     "workflow_node_update",
                     thread_id=resolved_thread_id,
-                    concurrency_mode=resolved_mode,
+                    concurrency_mode="send_api",
                     node_name=node_name,
                     node_event_count=node_event_counts[node_name],
                     since_previous_event_ms=since_previous_ms,
@@ -238,14 +227,13 @@ def analyze_video(
                         msg = f"{msg}\n✅ [微智能体群汇聚] 已完成 {num_chunks} 个分片的并行深度分析，成果已交付全局融合层..."
                 status_callback(msg)
 
-    if resolved_mode == "send_api":
-        _emit_chunk_progress(
-            total_chunks,
-            audio_done_ids,
-            vision_done_ids,
-            synthesis_done_ids,
-            stage="finished",
-        )
+    _emit_chunk_progress(
+        total_chunks,
+        audio_done_ids,
+        vision_done_ids,
+        synthesis_done_ids,
+        stage="finished",
+    )
 
     aggregated_chunk_insights = str(current_state.get("aggregated_chunk_insights", ""))
     editable_aggregated_chunk_insights = str(
@@ -274,7 +262,7 @@ def analyze_video(
             metrics_logger,
             "workflow_finished",
             thread_id=resolved_thread_id,
-            concurrency_mode=resolved_mode,
+            concurrency_mode="send_api",
             total_duration_ms=total_duration_ms,
             node_count=len(node_event_counts),
             node_event_counts=node_event_counts,
@@ -398,17 +386,22 @@ def answer_question_at_timestamp(
     if not isinstance(keyframes, list):
         keyframes = []
 
-    nearest_frame = find_nearest_keyframe(keyframes, target_seconds)
+    representative_frames = find_nearest_keyframe(keyframes, target_seconds, window_seconds=window_seconds)
     transcript_window = extract_transcript_window(transcript, target_seconds, window_seconds=window_seconds)
 
-    frame_time = nearest_frame.get("time", "未知") if nearest_frame else "未命中"
-    frame_image_b64 = (
-        resolve_frame_image_base64(nearest_frame, keyframes_base_path) if isinstance(nearest_frame, dict) else ""
-    )
+    # 处理多帧返回值：representative_frames 现在是一个列表
+    if not isinstance(representative_frames, list):
+        # 向后兼容：如果返回的是单帧（Dict），转换为列表
+        representative_frames = [representative_frames] if representative_frames else []
+
+    frame_times = [f.get("time", "未知") for f in representative_frames] if representative_frames else []
+    frame_times_str = ", ".join(frame_times) if frame_times else "未命中"
 
     if status_callback:
+        frame_count = len(representative_frames)
         status_callback(
-            f"🎯 [Time Travel] 已定位目标窗口 {timestamp} ±{window_seconds}s，最近关键帧时间戳: {frame_time}"
+            f"🎯 [Time Travel] 已定位目标窗口 {timestamp} ±{window_seconds}s，"
+            f"已选取 {frame_count} 帧代表性关键帧（时间戳: {frame_times_str}）"
         )
 
     api_key = os.getenv("OPENAI_API_KEY")
@@ -416,9 +409,9 @@ def answer_question_at_timestamp(
     if not api_key:
         return _build_time_travel_fallback_response(
             timestamp=timestamp,
-            frame_time=frame_time,
+            frame_time=frame_times_str,
             transcript_window=transcript_window,
-            reason="未配置 OPENAI_API_KEY，当前返回的是证据抽取结果。",
+            reason="未配置 OPENAI_API_KEY，当前返回的是证据抽取结果（已选取 {} 帧视觉证据）。".format(len(representative_frames)),
         )
 
     client = OpenAI(api_key=api_key, base_url=base_url)
@@ -434,20 +427,31 @@ def answer_question_at_timestamp(
         f"[会话ID] {resolved_thread_id}\n"
         f"[目标时间戳] {timestamp}\n"
         f"[时间窗] ±{window_seconds}s\n"
-        f"[最近关键帧时间戳] {frame_time}\n"
+        f"[已选取的关键帧时间戳] {frame_times_str}\n"
         f"[用户原始总结侧重点] {user_prompt}\n\n"
         f"[语音证据]\n{transcript_window}\n\n"
         f"[历史总结草稿摘要]\n{draft_summary[:1500]}"
     )
 
     user_content: List[Dict] = [{"type": "text", "text": evidence_text + f"\n\n[追问问题]\n{question}"}]
-    if frame_image_b64:
-        user_content.append(
-            {
-                "type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{frame_image_b64}", "detail": "auto"},
-            }
-        )
+    
+    # 为所有代表性帧添加图像证据
+    for idx, frame in enumerate(representative_frames, 1):
+        if isinstance(frame, dict):
+            frame_image_b64 = resolve_frame_image_base64(frame, keyframes_base_path)
+            if frame_image_b64:
+                frame_time = frame.get("time", "未知")
+                user_content.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{frame_image_b64}",
+                            "detail": "low",
+                        },
+                    }
+                )
+                # 在文本中添加帧的时间戳标注
+                user_content[0]["text"] += f"\n[视觉证据帧 {idx}] 时间戳: {frame_time}"
 
     messages_payload: Any = [
         {"role": "system", "content": system_prompt},
@@ -462,10 +466,10 @@ def answer_question_at_timestamp(
         )
     except Exception as exc:
         if status_callback:
-            status_callback(f"⚠️ [Time Travel] OpenAI 调用异常，已降级返回证据片段: {str(exc)}")
+            status_callback(f"⚠️ [Time Travel] OpenAI 调用异常，已降级返回证据片段（包含 {len(representative_frames)} 帧）: {str(exc)}")
         return _build_time_travel_fallback_response(
             timestamp=timestamp,
-            frame_time=frame_time,
+            frame_time=frame_times_str,
             transcript_window=transcript_window,
             reason=f"OpenAI API 调用异常: {str(exc)}",
         )

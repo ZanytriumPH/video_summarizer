@@ -18,7 +18,6 @@ class TestSynthesisSendApiFlow(unittest.TestCase):
         state = cast(
             VideoSummaryState,
             {
-                "concurrency_mode": "send_api",
                 "chunk_plan": [{"chunk_id": "c1"}, {"chunk_id": "c2"}],
                 "user_prompt": "focus",
                 "chunk_results": [
@@ -37,13 +36,11 @@ class TestSynthesisSendApiFlow(unittest.TestCase):
         self.assertEqual(sends, [])
 
     @patch("core.workflow.video_summary.nodes.chunk_synthesizer._process_single_chunk_synthesis")
-    @patch("core.workflow.video_summary.nodes.chunk_synthesizer.ThreadPoolExecutor")
-    def test_synthesis_send_worker_flow_generates_chunk_summary(self, mock_executor, mock_process):
+    def test_synthesis_send_worker_flow_generates_chunk_summary(self, mock_process):
         chunk_plan: List[Dict[str, Any]] = [{"chunk_id": "c1"}, {"chunk_id": "c2"}]
         state = cast(
             VideoSummaryState,
             {
-                "concurrency_mode": "send_api",
                 "chunk_plan": chunk_plan,
                 "user_prompt": "focus",
                 "chunk_results": [
@@ -88,7 +85,6 @@ class TestSynthesisSendApiFlow(unittest.TestCase):
         final_state = cast(
             VideoSummaryState,
             {
-                "concurrency_mode": "send_api",
                 "chunk_plan": chunk_plan,
                 "chunk_results": merged_results,
                 "user_prompt": "focus",
@@ -99,9 +95,6 @@ class TestSynthesisSendApiFlow(unittest.TestCase):
         self.assertEqual(len(result["chunk_results"]), 2)
         self.assertEqual(result["chunk_results"][0].get("chunk_summary"), "summary-c1")
         self.assertEqual(result["chunk_results"][1].get("chunk_summary"), "summary-c2")
-
-        # send_api 路径下不应触发线程池执行
-        mock_executor.assert_not_called()
 
 
 if __name__ == "__main__":

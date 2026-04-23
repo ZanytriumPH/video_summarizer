@@ -8,7 +8,7 @@
 
 - 多模态总结：同时利用 Whisper 转录文本与视频关键帧进行联合理解。
 - 两阶段工作流：第一阶段完成分片分析与聚合并进入人类审批，第二阶段才进行最终成文与质量审查。
-- LangGraph 工作流：基于分片规划与 Map-Reduce 编排，支持 `threadpool` 与 `send_api` 并发模式。
+- LangGraph 工作流：基于分片规划与 Map-Reduce 编排，采用 send_api 图级 fan-out/fan-in 并发架构。
 - Self-RAG 双重防线：先做事实核查，再做用户需求对齐，避免“有文笔但不靠谱”的输出。
 - 主动求知工具：当文本或画面出现生僻热词、梗图、未知 UI 或角色时，分析节点可调用 Tavily 搜索补充背景知识。
 - 人类在环（HITL）：支持对聚合稿进行人工编辑和补充指导意见，再触发最终总结生成。
@@ -34,7 +34,7 @@
 ### 3. 工作流层
 
 - chunk_planner_node：按时间轴生成分片计划（chunk_plan）
-- map_dispatch_node：按并发模式分发音频/视觉分片任务
+- map_dispatch_node：分发音频/视觉分片任务（send_api）
 - chunk_audio_* / chunk_vision_*：并行分析每个分片的语音与视觉证据
 - chunk_synthesizer_node：融合每个分片的音视频洞察
 - chunk_aggregator_node：汇总所有分片输出，生成聚合证据底稿
@@ -285,17 +285,16 @@ from services.workflow_service import VideoSummaryService
 service = VideoSummaryService(api_key="your-key", base_url="https://api.openai.com/v1")
 
 with open("sample.mp4", "rb") as video_file:
-  review_package = service.analyze_uploaded_video(
+    review_package = service.analyze_uploaded_video(
         uploaded_file=video_file,
         original_filename="sample.mp4",
         user_prompt="请重点分析视频中的操作流程",
-    concurrency_mode="threadpool",  # 或 send_api
     )
 
 summary = service.finalize_summary(
-  thread_id=review_package["thread_id"],
-  edited_aggregated_chunk_insights=review_package.get("editable_aggregated_chunk_insights", ""),
-  human_guidance="重点补充架构设计权衡与风险点",
+    thread_id=review_package["thread_id"],
+    edited_aggregated_chunk_insights=review_package.get("editable_aggregated_chunk_insights", ""),
+    human_guidance="重点补充架构设计权衡与风险点",
 )
 
 print(service.last_thread_id)
@@ -318,6 +317,62 @@ answer = service.ask_at_timestamp(
 
 print(answer)
 ```
+
+## 离线评估系统（轻量版）
+
+本仓库已提供最小可用评估闭环，包含：
+
+- 核心数据集：`evaluation/datasets/core_set.json`
+- 批量评估入口：`scripts/run_eval.py`
+- baseline 对比工具：`scripts/compare_eval_reports.py`
+
+### 1. 准备数据集
+
+在 `evaluation/datasets/core_set.json` 中维护样本。每条样本至少包含：
+
+1. `sample_id`
+2. `source_type`（`url` 或 `local`）
+3. `video_source`
+4. `user_prompt`
+5. `reference_summary` 或 `key_points`
+
+可通过 `enabled` 字段控制是否参与本次批量评估。
+
+### 2. 运行离线批量评估
+
+```bash
+python scripts/run_eval.py --dataset evaluation/datasets/core_set.json --output-dir evaluation/reports
+```
+
+常用参数：
+
+- `--max-samples 5`：只跑前 5 个启用样本
+- `--sample-ids id1,id2`：只跑指定样本
+- `--baseline-report evaluation/reports/<baseline_run>/report.json`：生成基础分数对比
+
+运行后将生成：
+
+- `evaluation/reports/<run_id>/report.json`
+- `evaluation/reports/<run_id>/report.md`
+- `evaluation/reports/<run_id>/samples/<sample_id>/final_summary.md`
+
+### 3. 对比两次评估结果
+
+```bash
+python scripts/compare_eval_reports.py \
+    --current evaluation/reports/<current_run>/report.json \
+    --baseline evaluation/reports/<baseline_run>/report.json
+```
+
+默认会在当前报告目录输出：
+
+- `compare_<timestamp>.md`
+- `compare_<timestamp>.json`
+
+当前评估默认只关注两个核心指标：
+
+1. Fact（一致性/幻觉风险）
+2. Task（任务对齐度）
 
 ## 测试
 

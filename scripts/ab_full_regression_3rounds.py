@@ -49,7 +49,7 @@ def parse_pytest_summary(output: str) -> Dict[str, Any]:
 
 def run_one(mode: str, round_no: int) -> Dict[str, Any]:
     env = os.environ.copy()
-    env["CONCURRENCY_MODE"] = mode
+    env["CONCURRENCY_MODE"] = "send_api"
     env["ENABLE_METRICS_LOGGING"] = "true"
     env["METRICS_SAMPLE_RATE"] = "1.0"
 
@@ -101,18 +101,11 @@ def main() -> None:
     all_records: List[Dict[str, Any]] = []
 
     for round_no in (1, 2, 3):
-        all_records.append(run_one("threadpool", round_no))
         all_records.append(run_one("send_api", round_no))
-
-    grouped = {
-        "threadpool": [r for r in all_records if r["mode"] == "threadpool"],
-        "send_api": [r for r in all_records if r["mode"] == "send_api"],
-    }
 
     report = {
         "records": all_records,
-        "threadpool": aggregate(grouped["threadpool"]),
-        "send_api": aggregate(grouped["send_api"]),
+        "send_api": aggregate(all_records),
     }
 
     print(json.dumps(report, ensure_ascii=False, indent=2))

@@ -34,7 +34,7 @@ class TestMapDispatcherNode(unittest.TestCase):
         self.assertEqual(result["chunk_retry_count"]["chunk-001"], 0)
         self.assertTrue(result["reduce_debug_info"]["dispatch_ready"])
         self.assertEqual(result["reduce_debug_info"]["chunk_count"], 2)
-        self.assertEqual(result["reduce_debug_info"]["dispatch_strategy"], "threadpool-node-parallel")
+        self.assertEqual(result["reduce_debug_info"]["dispatch_strategy"], "send-api-dual-pilot")
         self.assertEqual(result["reduce_debug_info"]["trace_id"], "trace-1")
         # chunk_results 应原样透传
         self.assertIs(result["chunk_results"], chunk_results)
@@ -43,7 +43,6 @@ class TestMapDispatcherNode(unittest.TestCase):
         state = cast(
             VideoSummaryState,
             {
-                "concurrency_mode": "send_api",
                 "chunk_plan": [{"chunk_id": "chunk-000", "start_sec": 0, "end_sec": 120}],
                 "chunk_results": [],
             },
@@ -68,25 +67,10 @@ class TestMapDispatcherNode(unittest.TestCase):
         self.assertTrue(result["reduce_debug_info"]["dispatch_ready"])
         self.assertEqual(result["chunk_results"], "invalid-results")
 
-    def test_route_audio_send_tasks_only_for_send_api(self):
-        state = cast(
-            VideoSummaryState,
-            {
-                "concurrency_mode": "threadpool",
-                "chunk_plan": [{"chunk_id": "chunk-000", "transcript_segment_indexes": [0]}],
-                "transcript": '{"segments": [{"text": "x"}]}',
-                "user_prompt": "p",
-                "chunk_results": [],
-            },
-        )
-        sends = route_audio_send_tasks(state)
-        self.assertEqual(sends, [])
-
     def test_route_audio_send_tasks_builds_send_payload(self):
         state = cast(
             VideoSummaryState,
             {
-                "concurrency_mode": "send_api",
                 "chunk_plan": [
                     {"chunk_id": "chunk-000", "transcript_segment_indexes": [0]},
                     {"chunk_id": "chunk-001", "transcript_segment_indexes": [1]},
@@ -105,28 +89,12 @@ class TestMapDispatcherNode(unittest.TestCase):
         arg0 = getattr(sends[0], "arg", {})
         self.assertEqual(arg0.get("current_chunk", {}).get("chunk_id"), "chunk-000")
         self.assertEqual(arg0.get("user_prompt"), "focus")
-        self.assertEqual(arg0.get("current_chunk_base_item", {}).get("audio_insights"), "old")
-
-    def test_route_vision_send_tasks_only_for_send_api(self):
-        state = cast(
-            VideoSummaryState,
-            {
-                "concurrency_mode": "threadpool",
-                "chunk_plan": [{"chunk_id": "chunk-000", "keyframe_indexes": [0]}],
-                "keyframes": [{"time": "00:01", "image": "x"}],
-                "keyframes_base_path": "./frames",
-                "user_prompt": "p",
-                "chunk_results": [],
-            },
-        )
-        sends = route_vision_send_tasks(state)
-        self.assertEqual(sends, [])
+        self.assertNotIn("current_chunk_base_item", arg0)
 
     def test_route_vision_send_tasks_builds_send_payload(self):
         state = cast(
             VideoSummaryState,
             {
-                "concurrency_mode": "send_api",
                 "chunk_plan": [
                     {"chunk_id": "chunk-000", "keyframe_indexes": [0]},
                     {"chunk_id": "chunk-001", "keyframe_indexes": [1]},
@@ -145,7 +113,7 @@ class TestMapDispatcherNode(unittest.TestCase):
         arg1 = getattr(sends[1], "arg", {})
         self.assertEqual(arg1.get("current_chunk", {}).get("chunk_id"), "chunk-001")
         self.assertEqual(arg1.get("keyframes_base_path"), "./frames")
-        self.assertEqual(arg1.get("current_chunk_base_item", {}).get("vision_insights"), "old-v")
+        self.assertNotIn("current_chunk_base_item", arg1)
 
     def test_synthesis_barrier_marks_ready_only_when_all_chunks_have_audio_and_vision(self):
         state = cast(
@@ -170,7 +138,6 @@ class TestMapDispatcherNode(unittest.TestCase):
         state = cast(
             VideoSummaryState,
             {
-                "concurrency_mode": "send_api",
                 "chunk_plan": [{"chunk_id": "c1"}, {"chunk_id": "c2"}],
                 "user_prompt": "focus",
                 "chunk_results": [
@@ -186,7 +153,6 @@ class TestMapDispatcherNode(unittest.TestCase):
         state = cast(
             VideoSummaryState,
             {
-                "concurrency_mode": "send_api",
                 "chunk_plan": [{"chunk_id": "c1"}, {"chunk_id": "c2"}],
                 "user_prompt": "focus",
                 "chunk_results": [

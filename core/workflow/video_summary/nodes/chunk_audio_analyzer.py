@@ -3,12 +3,11 @@ import os
 import re
 import time
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Tuple
 
 from openai import OpenAI
 
-from config.settings import CHUNK_MAX_TOOL_CALLS, ENABLE_CHUNK_CACHE, MAP_MAX_PARALLELISM
+from config.settings import CHUNK_MAX_TOOL_CALLS, ENABLE_CHUNK_CACHE
 from core.workflow.video_summary.state import VideoSummaryState
 from core.workflow.video_summary.tools.search_tools import execute_tavily_search
 
@@ -107,16 +106,11 @@ def _llm_audio_chunk_summary(chunk_id: str, chunk_text: str, user_prompt: str) -
     return response.choices[0].message.content or ""
 
 
-def _as_dict(value: Any) -> Dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
 def _process_single_chunk_audio(
     chunk_id: str,
     indexes: List[int],
     transcript_items: List[Dict[str, Any]],
     user_prompt: str,
-    base_item: Dict[str, Any],
 ) -> Tuple[str, Dict[str, Any]]:
     started = time.perf_counter()
     chunk_text = _extract_chunk_text(transcript_items, indexes)
@@ -136,110 +130,21 @@ def _process_single_chunk_audio(
 
     latency_ms = int((time.perf_counter() - started) * 1000)
 
-    merged = dict(base_item)
-    evidence_refs = _as_dict(merged.get("evidence_refs"))
-    token_usage = _as_dict(merged.get("token_usage"))
-    latency_info = _as_dict(merged.get("latency_ms"))
-
-    merged.update(
-        {
-            "chunk_id": chunk_id,
-            "audio_insights": insights,
-            "evidence_refs": {
-                **evidence_refs,
-                "transcript_segment_indexes": indexes,
-                "audio_searches": searches,
-            },
-            "token_usage": {
-                **token_usage,
-                "audio": 0,
-            },
-            "latency_ms": {
-                **latency_info,
-                "audio": latency_ms,
-            },
-        }
-    )
-    return chunk_id, merged
-
-
-def chunk_audio_analyzer_node(state: VideoSummaryState) -> dict:
-    """
-    分片音频分析节点。
-
-    地位:
-    - 位于 chunk_plan 之后，是多模态分析链路中的听觉分支。
-    - 与 chunk_vision_analyzer_node 并行执行，共同为后续融合提供分片证据。
-
-    任务:
-    - 从 transcript 中提取每个 chunk 对应的文本片段。
-    - 调用 LLM 生成音频侧摘要。
-    - 按需触发轻量检索并写入 evidence_refs。
-    - 记录 audio 维度的 latency_ms 和 token_usage 占位字段。
-
-    主要输入:
-    - state["chunk_plan"]: 每个 chunk 对应的 transcript_segment_indexes。
-    - state["transcript"]: 完整 transcript。
-    - state["user_prompt"]: 用户的总结偏好。
-    - state["chunk_results"]: 已存在的分片结果基座。
-
-    主要输出:
-    - chunk_results: 为每个 chunk 补充 audio_insights、audio_searches 和相关元数据。
-    """
-    chunk_plan = state.get("chunk_plan", [])
-    if not isinstance(chunk_plan, list) or not chunk_plan:
-        return {"chunk_results": state.get("chunk_results", [])}
-
-    transcript = state.get("transcript", "")
-    user_prompt = state.get("user_prompt", "")
-    transcript_items = _build_transcript_items(_load_transcript_data(transcript))
-
-    existing = state.get("chunk_results", [])
-    result_map: Dict[str, Dict[str, Any]] = {
-        str(item.get("chunk_id", "")): dict(item)
-        for item in existing
-        if isinstance(item, dict) and str(item.get("chunk_id", "")).strip()
+    delta = {
+        "chunk_id": chunk_id,
+        "audio_insights": insights,
+        "evidence_refs": {
+            "transcript_segment_indexes": indexes,
+            "audio_searches": searches,
+        },
+        "token_usage": {
+            "audio": 0,
+        },
+        "latency_ms": {
+            "audio": latency_ms,
+        },
     }
-
-    valid_jobs: List[Tuple[str, List[int]]] = []
-    for chunk in chunk_plan:
-        if not isinstance(chunk, dict):
-            continue
-        chunk_id = str(chunk.get("chunk_id", "")).strip()
-        if not chunk_id:
-            continue
-        indexes = chunk.get("transcript_segment_indexes", [])
-        if not isinstance(indexes, list):
-            indexes = []
-        valid_jobs.append((chunk_id, indexes))
-
-    max_workers = max(1, MAP_MAX_PARALLELISM)
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [
-            executor.submit(
-                _process_single_chunk_audio,
-                chunk_id,
-                indexes,
-                transcript_items,
-                user_prompt,
-                result_map.get(chunk_id, {"chunk_id": chunk_id}),
-            )
-            for chunk_id, indexes in valid_jobs
-        ]
-
-        for future in as_completed(futures):
-            chunk_id, merged = future.result()
-            result_map[chunk_id] = merged
-
-    ordered_results: List[Dict[str, Any]] = []
-    for chunk in chunk_plan:
-        if not isinstance(chunk, dict):
-            continue
-        chunk_id = str(chunk.get("chunk_id", "")).strip()
-        if chunk_id and chunk_id in result_map:
-            ordered_results.append(result_map[chunk_id])
-
-    return {"chunk_results": ordered_results}
+    return chunk_id, delta
 
 
 def chunk_audio_worker_node(state: VideoSummaryState) -> dict:
@@ -247,7 +152,7 @@ def chunk_audio_worker_node(state: VideoSummaryState) -> dict:
     Send API 路径下的单分片音频分析 worker。
 
     地位:
-    - 是 chunk_audio_analyzer_node 的单分片版本，用于图级 fan-out。
+    - Send API 图级 fan-out 下的单分片执行单元。
 
     任务:
     - 仅读取 current_chunk 对应的 transcript 片段。
@@ -255,7 +160,6 @@ def chunk_audio_worker_node(state: VideoSummaryState) -> dict:
 
     主要输入:
     - state["current_chunk"]
-    - state["current_chunk_base_item"]
     - state["transcript"]
     - state["user_prompt"]
 
@@ -278,15 +182,10 @@ def chunk_audio_worker_node(state: VideoSummaryState) -> dict:
     user_prompt = str(state.get("user_prompt", ""))
     transcript_items = _build_transcript_items(_load_transcript_data(transcript))
 
-    base_item = state.get("current_chunk_base_item", {"chunk_id": chunk_id})
-    if not isinstance(base_item, dict):
-        base_item = {"chunk_id": chunk_id}
-
     _, merged = _process_single_chunk_audio(
         chunk_id,
         indexes,
         transcript_items,
         user_prompt,
-        base_item,
     )
     return {"chunk_results": [merged]}
